@@ -26,7 +26,7 @@ Latency improvements:
 - reuses HTTP connections with pooling
 - caches recent Binance klines briefly to avoid repeated slow candle fetches
 
-## Run
+## Run CLI bot
 
 ```bash
 cd polymarket_probability_bot
@@ -36,6 +36,36 @@ pip install -r requirements.txt
 cp .env.example .env
 python bot.py --once
 ```
+
+Continuous dry-run:
+
+```bash
+python bot.py
+```
+
+## Run dashboard
+
+The dashboard starts the bot engine in the background and streams read-only events to the browser.
+
+```bash
+uvicorn pmpbot.dashboard:app --host 0.0.0.0 --port 8000
+```
+
+Open:
+
+```text
+http://localhost:8000
+```
+
+Dashboard v0 includes:
+
+- top health/status bar
+- BTC/ETH/SOL/XRP market cards
+- bid/ask, fair probability, edge, spread, spot/open distance
+- trade/skip decision and reason
+- latency per asset cycle
+- event log
+- current config view
 
 ## Live mode
 

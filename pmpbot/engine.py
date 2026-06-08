@@ -16,7 +16,7 @@ from .utils import now_iso, window_start
 
 
 class BotEngine:
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, event_sink=None):
         self.s = settings
         limits = httpx.Limits(max_connections=32, max_keepalive_connections=16)
         timeout = httpx.Timeout(settings.http_timeout_seconds)
@@ -26,6 +26,7 @@ class BotEngine:
         self.clob = ClobData(self.http, settings.clob_host)
         self.spot = SpotModel(self.http, settings.binance_api)
         self.executor = LiveExecutor(settings.clob_host, settings.order_notional_usd)
+        self.event_sink = event_sink
 
     async def close(self) -> None:
         await self.http.aclose()
@@ -44,17 +45,17 @@ class BotEngine:
         loop_start = time.perf_counter()
         start = window_start(time.time(), self.s.window_seconds)
         if self.state.count(asset, start) >= self.s.max_orders_per_market_window:
-            self._print({"event": "skip_duplicate_window", "asset": asset, "window": start, "latency_ms": self._latency(loop_start)})
+            self._emit({"event": "skip_duplicate_window", "asset": asset, "window": start, "latency_ms": self._latency(loop_start)})
             return
 
         market = await self.discovery.discover(asset, start)
         if not market:
-            self._print({"event": "skip_no_market", "asset": asset, "window": start, "latency_ms": self._latency(loop_start)})
+            self._emit({"event": "skip_no_market", "asset": asset, "window": start, "latency_ms": self._latency(loop_start)})
             return
 
         seconds_left = market.seconds_left
         if not (self.s.min_time_remaining_seconds <= seconds_left <= self.s.max_time_remaining_seconds):
-            self._print({"event": "skip_time_gate", "asset": asset, "seconds_left": seconds_left, "latency_ms": self._latency(loop_start)})
+            self._emit({"event": "skip_time_gate", "asset": asset, "seconds_left": seconds_left, "latency_ms": self._latency(loop_start)})
             return
 
         # Hot path: spot model and both side books are independent, fetch together.
@@ -65,7 +66,7 @@ class BotEngine:
 
         candidate = choose_candidate(market.token_up, market.token_down, features, up_book, down_book)
         if not candidate:
-            self._print({"event": "skip_empty_books", "asset": asset, "slug": market.slug, "latency_ms": self._latency(loop_start)})
+            self._emit({"event": "skip_empty_books", "asset": asset, "slug": market.slug, "latency_ms": self._latency(loop_start)})
             return
 
         decision = apply_gates(self.s, candidate)
@@ -84,7 +85,7 @@ class BotEngine:
         }
         if not decision.should_trade:
             log.update({"event": "skip", "reason": decision.reason})
-            self._print(log)
+            self._emit(log)
             return
 
         log["event"] = "order_intent"
@@ -94,13 +95,14 @@ class BotEngine:
         else:
             log["dry_run"] = True
             self.state.record(asset, start)
-        self._print(log)
+        self._emit(log)
 
     @staticmethod
     def _latency(start: float) -> int:
         return int((time.perf_counter() - start) * 1000)
 
-    @staticmethod
-    def _print(payload: dict) -> None:
+    def _emit(self, payload: dict) -> None:
         payload = {"ts": now_iso(), **payload}
+        if self.event_sink:
+            self.event_sink(payload)
         print(json.dumps(payload, default=str), flush=True)
