@@ -55,7 +55,7 @@ class BotEngine:
             return
 
         seconds_left = market.seconds_left
-        if not (self.s.min_time_remaining_seconds <= seconds_left <= self.s.max_time_remaining_seconds):
+        if not existing_position and not (self.s.min_time_remaining_seconds <= seconds_left <= self.s.max_time_remaining_seconds):
             self._emit({"event": "skip_time_gate", "asset": asset, "seconds_left": seconds_left, "latency_ms": self._latency(loop_start)})
             return
 

@@ -79,8 +79,14 @@ function recomputePnl() {
     pnl.assets[asset] = {capital_usd:capital, used_capital_usd:used, available_capital_usd:Math.max(0, capital-used), pnl_usd:p, charges_usd:c, position: Object.keys(pos).length ? pos : null};
     pnl.overall_pnl_usd += p; pnl.overall_charges_usd += c;
   }
-  state.pnl = state.pnl || pnl;
-  state.pnl.assets = {...pnl.assets, ...((state.pnl||{}).assets||{})};
+  const previousAssets = ((state.pnl || {}).assets || {});
+  state.pnl = {
+    overall_pnl_usd: 0,
+    overall_charges_usd: 0,
+    // Preserve existing assets only when there is no fresh market event;
+    // fresh computed values must overwrite old cached PnL.
+    assets: {...previousAssets, ...pnl.assets},
+  };
   state.pnl.overall_pnl_usd = Object.values(state.pnl.assets).reduce((a,x)=>a+Number(x.pnl_usd||0),0);
   state.pnl.overall_charges_usd = Object.values(state.pnl.assets).reduce((a,x)=>a+Number(x.charges_usd||0),0);
 }
