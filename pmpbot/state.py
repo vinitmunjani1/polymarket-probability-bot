@@ -24,7 +24,7 @@ class State:
         return sum(
             float(p.get("notional_usd", 0.0))
             for p in self.data.setdefault("positions", {}).values()
-            if p.get("asset") == asset and p.get("status", "open") == "open"
+            if p.get("asset") == asset and p.get("status", "open") in {"open", "pending"}
         )
 
     def record_order(self, asset: str, window: int) -> None:
@@ -33,7 +33,7 @@ class State:
         orders[key] = int(orders.get(key, 0)) + 1
         self.save()
 
-    def record_position(self, *, asset: str, window: int, slug: str, side: str, token_id: str, entry_price: float, notional_usd: float, charges_usd: float) -> dict[str, Any]:
+    def record_position(self, *, asset: str, window: int, slug: str, side: str, token_id: str, entry_price: float, notional_usd: float, charges_usd: float, status: str = "open", trigger_price: float | None = None) -> dict[str, Any]:
         key = f"{asset}:{window}"
         position = {
             "asset": asset,
@@ -45,7 +45,8 @@ class State:
             "notional_usd": float(notional_usd),
             "shares": float(notional_usd) / max(float(entry_price), 1e-9),
             "charges_usd": float(charges_usd),
-            "status": "open",
+            "status": status,
+            "trigger_price": trigger_price,
         }
         self.data.setdefault("positions", {})[key] = position
         self.save()

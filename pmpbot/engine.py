@@ -81,6 +81,8 @@ class BotEngine:
             return
 
         decision = apply_gates(self.s, candidate)
+        order_limit_price = float(self.s.limit_order_price)
+        dry_order_status = "open" if candidate.book.ask <= order_limit_price + 1e-9 else "pending"
         log = {
             "asset": asset,
             "window": start,
@@ -96,6 +98,9 @@ class BotEngine:
             "price_to_beat_source": price_to_beat["source"],
             "price_to_beat_provider": price_to_beat.get("provider"),
             "notional_usd": min(1.0, self.s.order_notional_usd),
+            "trigger_price": candidate.book.ask,
+            "order_limit_price": order_limit_price,
+            "dry_order_status": dry_order_status,
             "dry_capital_usd": self.s.dry_capital_per_asset_usd,
             "dry_used_capital_usd": self.state.asset_open_notional(asset),
             "latency_ms": self._latency(loop_start),
@@ -126,7 +131,7 @@ class BotEngine:
 
         log["event"] = "order_intent"
         if self.s.execution_mode == "live":
-            log["live_response"] = self.executor.buy(candidate.token_id, candidate.book.ask)
+            log["live_response"] = self.executor.buy(candidate.token_id, order_limit_price)
             self.state.record_order(asset, start)
         else:
             charges = self._dry_charges(notional)
@@ -136,12 +141,15 @@ class BotEngine:
                 slug=market.slug,
                 side=candidate.side,
                 token_id=candidate.token_id,
-                entry_price=candidate.book.ask,
+                entry_price=order_limit_price,
                 notional_usd=notional,
                 charges_usd=charges,
+                status=dry_order_status,
+                trigger_price=candidate.book.ask,
             )
             self.state.record_order(asset, start)
             log["dry_run"] = True
+            log["dry_used_capital_usd"] = self.state.asset_open_notional(asset)
             log.update(self._position_metrics(position, candidate.side, up_book, down_book))
         self._emit(log)
 
@@ -156,8 +164,12 @@ class BotEngine:
         shares = float(position.get("shares", 0.0))
         notional = float(position.get("notional_usd", 0.0))
         charges = float(position.get("charges_usd", 0.0))
-        mark_value = None if mark_price is None else shares * float(mark_price)
-        pnl = None if mark_value is None else mark_value - notional - charges
+        if position.get("status") == "pending":
+            mark_value = 0.0
+            pnl = -charges
+        else:
+            mark_value = None if mark_price is None else shares * float(mark_price)
+            pnl = None if mark_value is None else mark_value - notional - charges
         return {
             "position": {
                 **position,

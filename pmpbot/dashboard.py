@@ -69,27 +69,38 @@ function metric(label, value, cls='') { return `<div class="card metric"><div cl
 function recomputePnl() {
   const assets = ['BTC','ETH','SOL','XRP'];
   const pnl = {overall_pnl_usd:0, overall_charges_usd:0, assets:{}};
+  let overallUsed = 0;
   for (const asset of assets) {
     const m = (state.markets || {})[asset] || {};
     const positions = Object.values(state.positions || {}).filter(p => p.asset === asset);
     const pos = positions[positions.length - 1] || m.position || {};
-    const used = positions.filter(p => (p.status || 'open') === 'open').reduce((a,p)=>a+Number(p.notional_usd||0),0);
+    const used = positions.filter(p => ['open','pending'].includes(p.status || 'open')).reduce((a,p)=>a+Number(p.notional_usd||0),0);
+    overallUsed += used;
     const capital = Number(m.dry_capital_usd ?? ((state.config||{}).dry_capital_per_asset_usd) ?? 10);
     const p = positions.length ? positions.reduce((a,x)=>a+Number(x.pnl_usd||0),0) : Number(pos.pnl_usd ?? m.position_pnl_usd ?? 0);
     const c = positions.length ? positions.reduce((a,x)=>a+Number(x.charges_usd||0),0) : Number(pos.charges_usd ?? m.position_charges_usd ?? 0);
     pnl.assets[asset] = {capital_usd:capital, used_capital_usd:used, available_capital_usd:Math.max(0, capital-used), pnl_usd:p, charges_usd:c, positions, position: Object.keys(pos).length ? pos : null};
     pnl.overall_pnl_usd += p; pnl.overall_charges_usd += c;
   }
+  const totalCapital = Number(((state.config||{}).dry_capital_per_asset_usd) || 10) * assets.length;
   const previousAssets = ((state.pnl || {}).assets || {});
   state.pnl = {
     overall_pnl_usd: 0,
     overall_charges_usd: 0,
+    overall_starting_capital_usd: totalCapital,
+    overall_equity_usd: totalCapital,
+    overall_used_capital_usd: overallUsed,
+    overall_available_capital_usd: Math.max(0, totalCapital - overallUsed),
     // Preserve existing assets only when there is no fresh market event;
     // fresh computed values must overwrite old cached PnL.
     assets: {...previousAssets, ...pnl.assets},
   };
   state.pnl.overall_pnl_usd = Object.values(state.pnl.assets).reduce((a,x)=>a+Number(x.pnl_usd||0),0);
   state.pnl.overall_charges_usd = Object.values(state.pnl.assets).reduce((a,x)=>a+Number(x.charges_usd||0),0);
+  state.pnl.overall_used_capital_usd = Object.values(state.pnl.assets).reduce((a,x)=>a+Number(x.used_capital_usd||0),0);
+  state.pnl.overall_starting_capital_usd = totalCapital;
+  state.pnl.overall_available_capital_usd = Math.max(0, totalCapital - state.pnl.overall_used_capital_usd);
+  state.pnl.overall_equity_usd = totalCapital + state.pnl.overall_pnl_usd;
 }
 function mergeMarketEvent(asset, event) {
   const previous = (state.markets || {})[asset];
@@ -108,6 +119,8 @@ function render() {
     metric('Loop Latency', h.loop_latency_ms == null ? '—' : h.loop_latency_ms + 'ms', h.loop_latency_ms > 1000 ? 'red' : 'green'),
     metric('Last Update', h.last_update ? h.last_update.split('T')[1].slice(0,8) + ' UTC' : '—'),
     metric('Max Order', '$' + fmt(h.max_order_usd, 2)),
+    metric('Overall Capital', '$' + fmt((state.pnl||{}).overall_equity_usd, 2), ((state.pnl||{}).overall_equity_usd||0) >= ((state.pnl||{}).overall_starting_capital_usd||0) ? 'green' : 'red'),
+    metric('Capital Used', '$' + fmt((state.pnl||{}).overall_used_capital_usd, 2)),
     metric('Overall PnL', '$' + fmt((state.pnl||{}).overall_pnl_usd, 2), ((state.pnl||{}).overall_pnl_usd||0) >= 0 ? 'green' : 'red'),
     metric('Charges', '$' + fmt((state.pnl||{}).overall_charges_usd, 4), 'yellow'),
   ].join('');
@@ -134,6 +147,7 @@ function render() {
         <div class="row"><span class="muted">Distance</span><span>${distance}</span></div>
         <div class="row"><span class="muted">Dry Capital</span><span>$${fmt(pa.used_capital_usd,2)} / $${fmt(pa.capital_usd,2)}</span></div>
         <div class="row"><span class="muted">Position</span><span>${pos.side || '—'} @ ${price(pos.entry_price)} | $${fmt(pos.notional_usd,2)}</span></div>
+        <div class="row"><span class="muted">Order Limit / Status</span><span>${price(m.order_limit_price || pos.entry_price)} / ${pos.status || m.dry_order_status || '—'}</span></div>
         <div class="row"><span class="muted">Mark / PnL</span><span>${price(pos.mark_price)} / <b class="${(pa.pnl_usd||0) >= 0 ? 'green':'red'}">$${fmt(pa.pnl_usd,2)}</b></span></div>
         <div class="row"><span class="muted">Charges</span><span>$${fmt(pa.charges_usd,4)}</span></div>
         <div class="row"><span class="muted">Latency</span><span>${m.latency_ms ?? '—'}ms</span></div>

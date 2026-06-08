@@ -19,6 +19,13 @@ The bot is split into focused modules so the 5-minute market loop stays fast:
 - `pmpbot/state.py` — one-order-per-asset-window guardrail
 - `pmpbot/config.py` — env-driven settings
 
+Trading rule v0:
+
+- wait until chosen side ask is at least `MIN_SIGNAL_PRICE=0.80`
+- place/record a limit order at `LIMIT_ORDER_PRICE=0.82`
+- skip any candidate above `MAX_ENTRY_PRICE=0.90`
+- dry capital starts at `$10` per asset and overall equity updates with PnL
+
 Price-to-beat:
 
 - uses Vatic/Chainlink target API as the Polymarket price-to-beat

@@ -31,6 +31,10 @@ class DashboardState:
             "loop_latency_ms": None,
         }
         self.pnl: dict[str, Any] = {
+            "overall_starting_capital_usd": settings.dry_capital_per_asset_usd * len(settings.assets),
+            "overall_equity_usd": settings.dry_capital_per_asset_usd * len(settings.assets),
+            "overall_used_capital_usd": 0.0,
+            "overall_available_capital_usd": settings.dry_capital_per_asset_usd * len(settings.assets),
             "overall_pnl_usd": 0.0,
             "overall_charges_usd": 0.0,
             "assets": {},
@@ -117,11 +121,13 @@ class DashboardState:
         assets: dict[str, Any] = {}
         total_pnl = 0.0
         total_charges = 0.0
+        total_used = 0.0
         for asset in self.settings.assets:
             asset_positions = [p for p in self.positions.values() if p.get("asset") == asset]
             pnl = sum(float(p.get("pnl_usd") or 0.0) for p in asset_positions)
             charges = sum(float(p.get("charges_usd") or 0.0) for p in asset_positions)
-            used = sum(float(p.get("notional_usd") or 0.0) for p in asset_positions if p.get("status", "open") == "open")
+            used = sum(float(p.get("notional_usd") or 0.0) for p in asset_positions if p.get("status", "open") in {"open", "pending"})
+            total_used += used
             assets[asset] = {
                 "capital_usd": self.settings.dry_capital_per_asset_usd,
                 "used_capital_usd": used,
@@ -133,7 +139,12 @@ class DashboardState:
             }
             total_pnl += pnl
             total_charges += charges
+        total_capital = self.settings.dry_capital_per_asset_usd * len(self.settings.assets)
         self.pnl = {
+            "overall_starting_capital_usd": total_capital,
+            "overall_equity_usd": total_capital + total_pnl,
+            "overall_used_capital_usd": total_used,
+            "overall_available_capital_usd": max(0.0, total_capital - total_used),
             "overall_pnl_usd": total_pnl,
             "overall_charges_usd": total_charges,
             "assets": assets,
