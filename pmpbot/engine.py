@@ -108,6 +108,7 @@ class BotEngine:
         if existing_position:
             log.update({"event": "market_snapshot", "reason": "already_ordered_window"})
             log.update(self._position_metrics(existing_position, candidate.side, up_book, down_book))
+            log["dry_order_status"] = existing_position.get("status", "open")
             self._emit(log)
             return
 

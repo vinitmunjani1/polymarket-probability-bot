@@ -160,28 +160,91 @@ function render() {
   `).join('');
   document.getElementById('config').textContent = JSON.stringify(state.config || {}, null, 2);
 }
-async function boot() {
-  state = await fetch('/api/snapshot').then(r => r.json());
+const wsLanes = new Map();
+let lastWsMessageAt = 0;
+let snapshotPoller = null;
+
+function applySnapshot(snapshot) {
+  state = {
+    ...state,
+    ...snapshot,
+    markets: {...(state.markets || {}), ...(snapshot.markets || {})},
+    positions: {...(state.positions || {}), ...(snapshot.positions || {})},
+    events: snapshot.events || state.events || [],
+  };
   recomputePnl();
   render();
+}
+
+function applyEvent(event) {
+  if (event.type === 'heartbeat') {
+    lastWsMessageAt = Date.now();
+    updateConnectionBadge();
+    return;
+  }
+  if (event.type === 'snapshot') {
+    applySnapshot(event);
+    lastWsMessageAt = Date.now();
+    updateConnectionBadge();
+    return;
+  }
+  lastWsMessageAt = Date.now();
+  state.events = [event, ...(state.events || [])].slice(0,100);
+  if (event.asset) {
+    state.markets[event.asset] = mergeMarketEvent(event.asset, event);
+    const pos = state.markets[event.asset].position;
+    if (pos) state.positions[`${pos.asset || event.asset}:${pos.window || event.window || 'unknown'}`] = pos;
+  }
+  recomputePnl();
+  state.health.last_update = event.ts;
+  state.health.status = 'running';
+  if (event.latency_ms !== undefined) state.health.loop_latency_ms = event.latency_ms;
+  render();
+}
+
+function updateConnectionBadge() {
+  const open = [...wsLanes.values()].filter(ws => ws.readyState === WebSocket.OPEN).length;
+  const el = document.getElementById('conn');
+  if (open > 0) {
+    el.className = 'badge trade';
+    el.textContent = `CONNECTED ${open}/3`;
+  } else {
+    el.className = 'badge bad';
+    el.textContent = 'POLLING FALLBACK';
+  }
+}
+
+function connectLane(lane) {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-  const ws = new WebSocket(`${proto}://${location.host}/ws`);
-  ws.onopen = () => { document.getElementById('conn').className='badge trade'; document.getElementById('conn').textContent='CONNECTED'; };
-  ws.onclose = () => { document.getElementById('conn').className='badge bad'; document.getElementById('conn').textContent='DISCONNECTED'; setTimeout(boot, 2000); };
-  ws.onmessage = msg => {
-    const event = JSON.parse(msg.data);
-    state.events = [event, ...(state.events || [])].slice(0,100);
-    if (event.asset) {
-      state.markets[event.asset] = mergeMarketEvent(event.asset, event);
-      const pos = state.markets[event.asset].position;
-      if (pos) state.positions[`${pos.asset || event.asset}:${pos.window || event.window || 'unknown'}`] = pos;
-    }
-    recomputePnl();
-    state.health.last_update = event.ts;
-    state.health.status = 'running';
-    if (event.latency_ms !== undefined) state.health.loop_latency_ms = event.latency_ms;
-    render();
+  const ws = new WebSocket(`${proto}://${location.host}/ws?lane=${lane}`);
+  wsLanes.set(lane, ws);
+  ws.onopen = updateConnectionBadge;
+  ws.onclose = () => {
+    wsLanes.delete(lane);
+    updateConnectionBadge();
+    setTimeout(() => connectLane(lane), 1000 + lane * 700);
   };
+  ws.onerror = () => { try { ws.close(); } catch (_) {} };
+  ws.onmessage = msg => {
+    try { applyEvent(JSON.parse(msg.data)); } catch (e) { console.error('bad ws message', e); }
+  };
+}
+
+async function pollSnapshot() {
+  try {
+    const snapshot = await fetch('/api/snapshot', {cache:'no-store'}).then(r => r.json());
+    // Polling is both a fallback and a periodic reconciliation path.
+    applySnapshot(snapshot);
+  } catch (e) {
+    console.warn('snapshot poll failed', e);
+  }
+}
+
+async function boot() {
+  await pollSnapshot();
+  [0,1,2].forEach(connectLane);
+  if (!snapshotPoller) snapshotPoller = setInterval(pollSnapshot, 3000);
+  setInterval(updateConnectionBadge, 1000);
 }
 boot();
 </script>
@@ -229,9 +292,15 @@ def create_app() -> FastAPI:
         try:
             await ws.send_text(json.dumps({"type": "snapshot", **dash_state.snapshot()}, default=str))
             while True:
-                event = await queue.get()
-                await ws.send_text(json.dumps(event, default=str))
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=5.0)
+                    await ws.send_text(json.dumps(event, default=str))
+                except asyncio.TimeoutError:
+                    await ws.send_text(json.dumps({"type": "heartbeat"}, default=str))
         except WebSocketDisconnect:
+            pass
+        except RuntimeError:
+            # Socket closed while a send was in progress.
             pass
         finally:
             dash_state.unsubscribe(queue)
