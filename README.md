@@ -22,8 +22,9 @@ The bot is split into focused modules so the 5-minute market loop stays fast:
 Trading rule v0:
 
 - wait until chosen side ask is at least `MIN_SIGNAL_PRICE=0.80`
-- place/record a limit order at `LIMIT_ORDER_PRICE=0.82`
+- buy immediately at the current ask using market-style execution
 - skip any candidate above `MAX_ENTRY_PRICE=0.90`
+- never trade above `MAX_ENTRY_PRICE=0.90`
 - dry capital starts at `$10` per asset and overall equity updates with PnL
 
 Price-to-beat:

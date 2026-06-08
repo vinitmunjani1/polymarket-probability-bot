@@ -45,7 +45,7 @@ def apply_gates(settings: Settings, candidate: Candidate) -> Decision:
     trigger_pass = edge_pass if mode == "edge" else (signal_pass if mode == "signal" else edge_pass or signal_pass)
 
     if not trigger_pass:
-        reason = "edge_too_small"
+        reason = "signal_price_below_min" if mode == "signal" else "edge_too_small"
     elif candidate.book.spread > settings.max_spread_cents / 100:
         reason = "spread_too_wide"
     elif not (settings.min_entry_price <= candidate.book.ask <= settings.max_entry_price):

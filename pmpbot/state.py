@@ -24,7 +24,7 @@ class State:
         return sum(
             float(p.get("notional_usd", 0.0))
             for p in self.data.setdefault("positions", {}).values()
-            if p.get("asset") == asset and p.get("status", "open") in {"open", "pending"}
+            if p.get("asset") == asset and p.get("status", "open") == "open"
         )
 
     def record_order(self, asset: str, window: int) -> None:

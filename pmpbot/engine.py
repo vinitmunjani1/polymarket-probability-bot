@@ -81,8 +81,7 @@ class BotEngine:
             return
 
         decision = apply_gates(self.s, candidate)
-        order_limit_price = float(self.s.limit_order_price)
-        dry_order_status = "open" if candidate.book.ask <= order_limit_price + 1e-9 else "pending"
+        execution_price = float(candidate.book.ask)
         log = {
             "asset": asset,
             "window": start,
@@ -99,8 +98,9 @@ class BotEngine:
             "price_to_beat_provider": price_to_beat.get("provider"),
             "notional_usd": min(1.0, self.s.order_notional_usd),
             "trigger_price": candidate.book.ask,
-            "order_limit_price": order_limit_price,
-            "dry_order_status": dry_order_status,
+            "execution_price": execution_price,
+            "execution_type": "market",
+            "dry_order_status": "not_placed",
             "dry_capital_usd": self.s.dry_capital_per_asset_usd,
             "dry_used_capital_usd": self.state.asset_open_notional(asset),
             "latency_ms": self._latency(loop_start),
@@ -130,8 +130,11 @@ class BotEngine:
             return
 
         log["event"] = "order_intent"
+        log["dry_order_status"] = "open"
         if self.s.execution_mode == "live":
-            log["live_response"] = self.executor.buy(candidate.token_id, order_limit_price)
+            # Polymarket CLOB has no pure market order; this is an aggressive
+            # limit at the current ask with post_only=False, i.e. market-style.
+            log["live_response"] = self.executor.buy(candidate.token_id, execution_price)
             self.state.record_order(asset, start)
         else:
             charges = self._dry_charges(notional)
@@ -141,10 +144,10 @@ class BotEngine:
                 slug=market.slug,
                 side=candidate.side,
                 token_id=candidate.token_id,
-                entry_price=order_limit_price,
+                entry_price=execution_price,
                 notional_usd=notional,
                 charges_usd=charges,
-                status=dry_order_status,
+                status="open",
                 trigger_price=candidate.book.ask,
             )
             self.state.record_order(asset, start)
@@ -164,12 +167,8 @@ class BotEngine:
         shares = float(position.get("shares", 0.0))
         notional = float(position.get("notional_usd", 0.0))
         charges = float(position.get("charges_usd", 0.0))
-        if position.get("status") == "pending":
-            mark_value = 0.0
-            pnl = -charges
-        else:
-            mark_value = None if mark_price is None else shares * float(mark_price)
-            pnl = None if mark_value is None else mark_value - notional - charges
+        mark_value = None if mark_price is None else shares * float(mark_price)
+        pnl = None if mark_value is None else mark_value - notional - charges
         return {
             "position": {
                 **position,

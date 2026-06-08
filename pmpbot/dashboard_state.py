@@ -126,7 +126,7 @@ class DashboardState:
             asset_positions = [p for p in self.positions.values() if p.get("asset") == asset]
             pnl = sum(float(p.get("pnl_usd") or 0.0) for p in asset_positions)
             charges = sum(float(p.get("charges_usd") or 0.0) for p in asset_positions)
-            used = sum(float(p.get("notional_usd") or 0.0) for p in asset_positions if p.get("status", "open") in {"open", "pending"})
+            used = sum(float(p.get("notional_usd") or 0.0) for p in asset_positions if p.get("status", "open") == "open")
             total_used += used
             assets[asset] = {
                 "capital_usd": self.settings.dry_capital_per_asset_usd,
