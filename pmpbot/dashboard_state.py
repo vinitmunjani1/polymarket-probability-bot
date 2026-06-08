@@ -44,7 +44,8 @@ class DashboardState:
         if "latency_ms" in event:
             self.health["loop_latency_ms"] = event["latency_ms"]
         if asset := event.get("asset"):
-            self.markets[str(asset)] = event
+            asset_key = str(asset)
+            self.markets[asset_key] = self._merge_market_event(asset_key, event)
             self._recompute_pnl()
         for queue in list(self._subscribers):
             try:
@@ -76,6 +77,31 @@ class DashboardState:
             data = dict(self.settings.__dict__)
         data["state_path"] = str(data.get("state_path"))
         return data
+
+    def _merge_market_event(self, asset: str, event: dict[str, Any]) -> dict[str, Any]:
+        """Keep the dashboard useful when late-window books temporarily vanish.
+
+        Near expiry Polymarket can return empty books. Those events are sparse
+        (`skip_empty_books`, `skip_no_market`, etc.). If we replace the latest
+        rich market snapshot with that sparse event, the card becomes blank even
+        though the last good price/position is still the best available display.
+        Preserve rich fields and overlay the latest status/reason/latency.
+        """
+        previous = self.markets.get(asset)
+        if not previous:
+            return event
+
+        sparse_events = {"skip_empty_books", "skip_no_market", "skip_time_gate"}
+        rich_keys = {"bid", "ask", "fair", "edge", "features", "position", "price_to_beat"}
+        is_sparse = event.get("event") in sparse_events and not any(k in event for k in rich_keys)
+        if not is_sparse:
+            return event
+
+        preserved = {**previous, **event}
+        preserved["stale_market_data"] = True
+        preserved["stale_reason"] = event.get("event")
+        preserved["last_good_ts"] = previous.get("ts")
+        return preserved
 
     def _recompute_pnl(self) -> None:
         assets: dict[str, Any] = {}

@@ -90,6 +90,15 @@ function recomputePnl() {
   state.pnl.overall_pnl_usd = Object.values(state.pnl.assets).reduce((a,x)=>a+Number(x.pnl_usd||0),0);
   state.pnl.overall_charges_usd = Object.values(state.pnl.assets).reduce((a,x)=>a+Number(x.charges_usd||0),0);
 }
+function mergeMarketEvent(asset, event) {
+  const previous = (state.markets || {})[asset];
+  if (!previous) return event;
+  const sparseEvents = new Set(['skip_empty_books', 'skip_no_market', 'skip_time_gate']);
+  const richKeys = ['bid', 'ask', 'fair', 'edge', 'features', 'position', 'price_to_beat'];
+  const isSparse = sparseEvents.has(event.event) && !richKeys.some(k => event[k] !== undefined);
+  if (!isSparse) return event;
+  return {...previous, ...event, stale_market_data: true, stale_reason: event.event, last_good_ts: previous.ts};
+}
 function render() {
   const h = state.health || {};
   document.getElementById('health').innerHTML = [
@@ -115,6 +124,7 @@ function render() {
       <div class="rows">
         <div class="row"><span class="muted">Decision</span><b>${m.side || '—'} ${m.event === 'order_intent' ? 'INTENT' : ''}</b></div>
         <div class="row"><span class="muted">Reason</span><span>${m.reason || (m.dry_run ? 'dry-run' : '—')}</span></div>
+        ${m.stale_market_data ? `<div class="row"><span class="muted">Data Status</span><span class="yellow">stale: ${m.stale_reason || 'book unavailable'}</span></div>` : ''}
         <div class="row"><span class="muted">Bid / Ask</span><span>${price(m.bid)} / ${price(m.ask)}</span></div>
         <div class="row"><span class="muted">Fair Prob</span><span class="blue">${price(m.fair)}</span></div>
         <div class="row"><span class="muted">Edge</span><span class="${m.edge >= 0.03 ? 'green' : 'yellow'}">${cents(m.edge)}</span></div>
@@ -146,7 +156,7 @@ async function boot() {
   ws.onmessage = msg => {
     const event = JSON.parse(msg.data);
     state.events = [event, ...(state.events || [])].slice(0,100);
-    if (event.asset) state.markets[event.asset] = event;
+    if (event.asset) state.markets[event.asset] = mergeMarketEvent(event.asset, event);
     recomputePnl();
     state.health.last_update = event.ts;
     state.health.status = 'running';
