@@ -18,6 +18,9 @@ class Settings:
     window_seconds: int = 300
     execution_mode: str = "dry-run"
     order_notional_usd: float = 1.0
+    dry_capital_per_asset_usd: float = 10.0
+    dry_charge_rate_bps: float = 0.0
+    dry_fixed_charge_usd: float = 0.0
     max_orders_per_market_window: int = 1
     min_edge_cents: float = 3.0
     max_spread_cents: float = 3.0
@@ -40,6 +43,9 @@ class Settings:
             window_seconds=int(os.getenv("WINDOW_SECONDS", "300")),
             execution_mode=os.getenv("EXECUTION_MODE", "dry-run").strip().lower(),
             order_notional_usd=float(os.getenv("ORDER_NOTIONAL_USD", "1.0")),
+            dry_capital_per_asset_usd=float(os.getenv("DRY_CAPITAL_PER_ASSET_USD", "10.0")),
+            dry_charge_rate_bps=float(os.getenv("DRY_CHARGE_RATE_BPS", "0.0")),
+            dry_fixed_charge_usd=float(os.getenv("DRY_FIXED_CHARGE_USD", "0.0")),
             max_orders_per_market_window=int(os.getenv("MAX_ORDERS_PER_MARKET_WINDOW", "1")),
             min_edge_cents=float(os.getenv("MIN_EDGE_CENTS", "3.0")),
             max_spread_cents=float(os.getenv("MAX_SPREAD_CENTS", "3.0")),

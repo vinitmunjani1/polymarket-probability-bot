@@ -66,6 +66,24 @@ const fmt = (x, d=2) => (x === undefined || x === null || Number.isNaN(x)) ? '�
 const cents = x => (x === undefined || x === null) ? '—' : (Number(x)*100).toFixed(1) + '¢';
 const price = x => (x === undefined || x === null) ? '—' : Number(x).toFixed(3);
 function metric(label, value, cls='') { return `<div class="card metric"><div class="label">${label}</div><div class="value ${cls}">${value}</div></div>`; }
+function recomputePnl() {
+  const assets = ['BTC','ETH','SOL','XRP'];
+  const pnl = {overall_pnl_usd:0, overall_charges_usd:0, assets:{}};
+  for (const asset of assets) {
+    const m = (state.markets || {})[asset] || {};
+    const pos = m.position || {};
+    const used = Number(m.dry_used_capital_usd ?? pos.notional_usd ?? 0);
+    const capital = Number(m.dry_capital_usd ?? ((state.config||{}).dry_capital_per_asset_usd) ?? 10);
+    const p = Number(pos.pnl_usd ?? m.position_pnl_usd ?? 0);
+    const c = Number(pos.charges_usd ?? m.position_charges_usd ?? 0);
+    pnl.assets[asset] = {capital_usd:capital, used_capital_usd:used, available_capital_usd:Math.max(0, capital-used), pnl_usd:p, charges_usd:c, position: Object.keys(pos).length ? pos : null};
+    pnl.overall_pnl_usd += p; pnl.overall_charges_usd += c;
+  }
+  state.pnl = state.pnl || pnl;
+  state.pnl.assets = {...pnl.assets, ...((state.pnl||{}).assets||{})};
+  state.pnl.overall_pnl_usd = Object.values(state.pnl.assets).reduce((a,x)=>a+Number(x.pnl_usd||0),0);
+  state.pnl.overall_charges_usd = Object.values(state.pnl.assets).reduce((a,x)=>a+Number(x.charges_usd||0),0);
+}
 function render() {
   const h = state.health || {};
   document.getElementById('health').innerHTML = [
@@ -74,13 +92,16 @@ function render() {
     metric('Loop Latency', h.loop_latency_ms == null ? '—' : h.loop_latency_ms + 'ms', h.loop_latency_ms > 1000 ? 'red' : 'green'),
     metric('Last Update', h.last_update ? h.last_update.split('T')[1].slice(0,8) + ' UTC' : '—'),
     metric('Max Order', '$' + fmt(h.max_order_usd, 2)),
-    metric('Assets', (h.active_assets || []).join(', ')),
+    metric('Overall PnL', '$' + fmt((state.pnl||{}).overall_pnl_usd, 2), ((state.pnl||{}).overall_pnl_usd||0) >= 0 ? 'green' : 'red'),
+    metric('Charges', '$' + fmt((state.pnl||{}).overall_charges_usd, 4), 'yellow'),
   ].join('');
 
   const assets = ['BTC','ETH','SOL','XRP'];
   document.getElementById('markets').innerHTML = assets.map(asset => {
     const m = (state.markets || {})[asset] || {};
     const f = m.features || {};
+    const pa = (((state.pnl || {}).assets || {})[asset]) || {};
+    const pos = pa.position || m.position || {};
     const eventClass = m.event === 'order_intent' ? 'trade' : (String(m.event||'').startsWith('skip') ? 'skip' : 'bad');
     const distance = f.spot && f.open ? ((f.spot / f.open - 1) * 100).toFixed(3) + '%' : '—';
     return `<div class="card">
@@ -94,6 +115,10 @@ function render() {
         <div class="row"><span class="muted">Spread</span><span>${cents(m.spread)}</span></div>
         <div class="row"><span class="muted">Spot / Open</span><span>${fmt(f.spot, asset==='XRP'?4:2)} / ${fmt(f.open, asset==='XRP'?4:2)}</span></div>
         <div class="row"><span class="muted">Distance</span><span>${distance}</span></div>
+        <div class="row"><span class="muted">Dry Capital</span><span>$${fmt(pa.used_capital_usd,2)} / $${fmt(pa.capital_usd,2)}</span></div>
+        <div class="row"><span class="muted">Position</span><span>${pos.side || '—'} @ ${price(pos.entry_price)} | $${fmt(pos.notional_usd,2)}</span></div>
+        <div class="row"><span class="muted">Mark / PnL</span><span>${price(pos.mark_price)} / <b class="${(pa.pnl_usd||0) >= 0 ? 'green':'red'}">$${fmt(pa.pnl_usd,2)}</b></span></div>
+        <div class="row"><span class="muted">Charges</span><span>$${fmt(pa.charges_usd,4)}</span></div>
         <div class="row"><span class="muted">Latency</span><span>${m.latency_ms ?? '—'}ms</span></div>
       </div>
     </div>`;
@@ -106,6 +131,7 @@ function render() {
 }
 async function boot() {
   state = await fetch('/api/snapshot').then(r => r.json());
+  recomputePnl();
   render();
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   const ws = new WebSocket(`${proto}://${location.host}/ws`);
@@ -115,6 +141,7 @@ async function boot() {
     const event = JSON.parse(msg.data);
     state.events = [event, ...(state.events || [])].slice(0,100);
     if (event.asset) state.markets[event.asset] = event;
+    recomputePnl();
     state.health.last_update = event.ts;
     state.health.status = 'running';
     if (event.latency_ms !== undefined) state.health.loop_latency_ms = event.latency_ms;

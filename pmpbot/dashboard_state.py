@@ -29,6 +29,11 @@ class DashboardState:
             "max_orders_per_window": settings.max_orders_per_market_window,
             "loop_latency_ms": None,
         }
+        self.pnl: dict[str, Any] = {
+            "overall_pnl_usd": 0.0,
+            "overall_charges_usd": 0.0,
+            "assets": {},
+        }
         self._subscribers: set[asyncio.Queue] = set()
 
     def publish(self, event: dict[str, Any]) -> None:
@@ -40,6 +45,7 @@ class DashboardState:
             self.health["loop_latency_ms"] = event["latency_ms"]
         if asset := event.get("asset"):
             self.markets[str(asset)] = event
+            self._recompute_pnl()
         for queue in list(self._subscribers):
             try:
                 queue.put_nowait(event)
@@ -51,6 +57,7 @@ class DashboardState:
             "health": self.health,
             "config": self._settings_dict(),
             "markets": self.markets,
+            "pnl": self.pnl,
             "events": list(self.events)[:100],
         }
 
@@ -69,3 +76,29 @@ class DashboardState:
             data = dict(self.settings.__dict__)
         data["state_path"] = str(data.get("state_path"))
         return data
+
+    def _recompute_pnl(self) -> None:
+        assets: dict[str, Any] = {}
+        total_pnl = 0.0
+        total_charges = 0.0
+        for asset in self.settings.assets:
+            event = self.markets.get(asset, {})
+            position = event.get("position") or {}
+            pnl = float(position.get("pnl_usd") or 0.0)
+            charges = float(position.get("charges_usd") or 0.0)
+            used = float(event.get("dry_used_capital_usd") or position.get("notional_usd") or 0.0)
+            assets[asset] = {
+                "capital_usd": self.settings.dry_capital_per_asset_usd,
+                "used_capital_usd": used,
+                "available_capital_usd": max(0.0, self.settings.dry_capital_per_asset_usd - used),
+                "pnl_usd": pnl,
+                "charges_usd": charges,
+                "position": position or None,
+            }
+            total_pnl += pnl
+            total_charges += charges
+        self.pnl = {
+            "overall_pnl_usd": total_pnl,
+            "overall_charges_usd": total_charges,
+            "assets": assets,
+        }

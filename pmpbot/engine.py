@@ -44,9 +44,8 @@ class BotEngine:
     async def evaluate_asset(self, asset: str) -> None:
         loop_start = time.perf_counter()
         start = window_start(time.time(), self.s.window_seconds)
-        if self.state.count(asset, start) >= self.s.max_orders_per_market_window:
-            self._emit({"event": "skip_duplicate_window", "asset": asset, "window": start, "latency_ms": self._latency(loop_start)})
-            return
+        already_ordered = self.state.count(asset, start) >= self.s.max_orders_per_market_window
+        existing_position = self.state.position(asset, start)
 
         market = await self.discovery.discover(asset, start)
         if not market:
@@ -72,6 +71,7 @@ class BotEngine:
         decision = apply_gates(self.s, candidate)
         log = {
             "asset": asset,
+            "window": start,
             "slug": market.slug,
             "side": candidate.side,
             "ask": candidate.book.ask,
@@ -81,21 +81,81 @@ class BotEngine:
             "edge": candidate.edge,
             "features": features.as_dict(),
             "notional_usd": min(1.0, self.s.order_notional_usd),
+            "dry_capital_usd": self.s.dry_capital_per_asset_usd,
+            "dry_used_capital_usd": self.state.asset_open_notional(asset),
             "latency_ms": self._latency(loop_start),
         }
+        if existing_position:
+            log.update({"event": "market_snapshot", "reason": "already_ordered_window"})
+            log.update(self._position_metrics(existing_position, candidate.side, up_book, down_book))
+            self._emit(log)
+            return
+
+        if already_ordered:
+            # Legacy/order-count state without a recorded position: do not spam duplicate skips.
+            log.update({"event": "market_snapshot", "reason": "already_ordered_window"})
+            self._emit(log)
+            return
+
         if not decision.should_trade:
             log.update({"event": "skip", "reason": decision.reason})
+            self._emit(log)
+            return
+
+        notional = min(1.0, self.s.order_notional_usd)
+        dry_used = self.state.asset_open_notional(asset)
+        if self.s.execution_mode != "live" and dry_used + notional > self.s.dry_capital_per_asset_usd + 1e-9:
+            log.update({"event": "skip", "reason": "dry_capital_limit", "dry_used_capital_usd": dry_used})
             self._emit(log)
             return
 
         log["event"] = "order_intent"
         if self.s.execution_mode == "live":
             log["live_response"] = self.executor.buy(candidate.token_id, candidate.book.ask)
-            self.state.record(asset, start)
+            self.state.record_order(asset, start)
         else:
+            charges = self._dry_charges(notional)
+            position = self.state.record_position(
+                asset=asset,
+                window=start,
+                slug=market.slug,
+                side=candidate.side,
+                token_id=candidate.token_id,
+                entry_price=candidate.book.ask,
+                notional_usd=notional,
+                charges_usd=charges,
+            )
+            self.state.record_order(asset, start)
             log["dry_run"] = True
-            self.state.record(asset, start)
+            log.update(self._position_metrics(position, candidate.side, up_book, down_book))
         self._emit(log)
+
+    def _dry_charges(self, notional: float) -> float:
+        return float(self.s.dry_fixed_charge_usd) + float(notional) * float(self.s.dry_charge_rate_bps) / 10_000.0
+
+    @staticmethod
+    def _position_metrics(position: dict, candidate_side: str, up_book, down_book) -> dict:
+        held_side = position.get("side")
+        held_book = up_book if held_side == "UP" else down_book
+        mark_price = held_book.bid if held_book else None
+        shares = float(position.get("shares", 0.0))
+        notional = float(position.get("notional_usd", 0.0))
+        charges = float(position.get("charges_usd", 0.0))
+        mark_value = None if mark_price is None else shares * float(mark_price)
+        pnl = None if mark_value is None else mark_value - notional - charges
+        return {
+            "position": {
+                **position,
+                "mark_price": mark_price,
+                "mark_value_usd": mark_value,
+                "pnl_usd": pnl,
+                "charges_usd": charges,
+            },
+            "position_pnl_usd": pnl,
+            "position_charges_usd": charges,
+            "held_side": held_side,
+            "best_candidate_side": candidate_side,
+        }
 
     @staticmethod
     def _latency(start: float) -> int:
