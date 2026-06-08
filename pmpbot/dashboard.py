@@ -113,7 +113,7 @@ function render() {
         <div class="row"><span class="muted">Fair Prob</span><span class="blue">${price(m.fair)}</span></div>
         <div class="row"><span class="muted">Edge</span><span class="${m.edge >= 0.03 ? 'green' : 'yellow'}">${cents(m.edge)}</span></div>
         <div class="row"><span class="muted">Spread</span><span>${cents(m.spread)}</span></div>
-        <div class="row"><span class="muted">Spot / Open</span><span>${fmt(f.spot, asset==='XRP'?4:2)} / ${fmt(f.open, asset==='XRP'?4:2)}</span></div>
+        <div class="row"><span class="muted">Spot / Price to Beat</span><span>${fmt(f.spot, asset==='XRP'?4:2)} / ${fmt(f.open, asset==='XRP'?4:2)}</span></div>
         <div class="row"><span class="muted">Distance</span><span>${distance}</span></div>
         <div class="row"><span class="muted">Dry Capital</span><span>$${fmt(pa.used_capital_usd,2)} / $${fmt(pa.capital_usd,2)}</span></div>
         <div class="row"><span class="muted">Position</span><span>${pos.side || '—'} @ ${price(pos.entry_price)} | $${fmt(pos.notional_usd,2)}</span></div>

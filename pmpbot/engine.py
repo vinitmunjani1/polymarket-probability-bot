@@ -13,6 +13,7 @@ from .spot import SpotModel
 from .state import State
 from .strategy import apply_gates, choose_candidate
 from .utils import now_iso, window_start
+from .vatic import VaticPriceFeed
 
 
 class BotEngine:
@@ -25,6 +26,7 @@ class BotEngine:
         self.discovery = MarketDiscovery(self.http, settings.gamma_api)
         self.clob = ClobData(self.http, settings.clob_host)
         self.spot = SpotModel(self.http, settings.binance_api)
+        self.vatic = VaticPriceFeed(self.http)
         self.executor = LiveExecutor(settings.clob_host, settings.order_notional_usd)
         self.event_sink = event_sink
 
@@ -57,13 +59,23 @@ class BotEngine:
             self._emit({"event": "skip_time_gate", "asset": asset, "seconds_left": seconds_left, "latency_ms": self._latency(loop_start)})
             return
 
-        # Hot path: spot model and both side books are independent, fetch together.
-        features_task = asyncio.create_task(self.spot.features(asset, market.start_ts, seconds_left))
+        # Fetch oracle target and both books concurrently. Features depend on
+        # the oracle target, but books do not, so start all network I/O now.
+        price_to_beat_task = asyncio.create_task(self.vatic.price_to_beat(asset, market.start_ts, "5min"))
         up_book_task = asyncio.create_task(self.clob.book(market.token_up))
         down_book_task = asyncio.create_task(self.clob.book(market.token_down))
+
+        price_to_beat = await price_to_beat_task
+        if not price_to_beat:
+            up_book_task.cancel()
+            down_book_task.cancel()
+            self._emit({"event": "skip", "reason": "price_to_beat_unavailable", "asset": asset, "window": start, "slug": market.slug, "latency_ms": self._latency(loop_start)})
+            return
+
+        features_task = asyncio.create_task(self.spot.features(asset, market.start_ts, seconds_left, price_to_beat=float(price_to_beat["price"])))
         features, up_book, down_book = await asyncio.gather(features_task, up_book_task, down_book_task)
 
-        candidate = choose_candidate(market.token_up, market.token_down, features, up_book, down_book)
+        candidate = choose_candidate(self.s, market.token_up, market.token_down, features, up_book, down_book)
         if not candidate:
             self._emit({"event": "skip_empty_books", "asset": asset, "slug": market.slug, "latency_ms": self._latency(loop_start)})
             return
@@ -80,6 +92,9 @@ class BotEngine:
             "fair": candidate.fair,
             "edge": candidate.edge,
             "features": features.as_dict(),
+            "price_to_beat": price_to_beat["price"],
+            "price_to_beat_source": price_to_beat["source"],
+            "price_to_beat_provider": price_to_beat.get("provider"),
             "notional_usd": min(1.0, self.s.order_notional_usd),
             "dry_capital_usd": self.s.dry_capital_per_asset_usd,
             "dry_used_capital_usd": self.state.asset_open_notional(asset),

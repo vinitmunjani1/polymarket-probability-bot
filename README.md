@@ -19,6 +19,12 @@ The bot is split into focused modules so the 5-minute market loop stays fast:
 - `pmpbot/state.py` — one-order-per-asset-window guardrail
 - `pmpbot/config.py` — env-driven settings
 
+Price-to-beat:
+
+- uses Vatic/Chainlink target API as the Polymarket price-to-beat
+- does not use Binance candle open as the resolution boundary
+- Binance remains a fast current spot / volatility input
+
 Latency improvements:
 
 - evaluates all assets concurrently
@@ -61,7 +67,7 @@ Dashboard v0 includes:
 
 - top health/status bar
 - BTC/ETH/SOL/XRP market cards
-- bid/ask, fair probability, edge, spread, spot/open distance
+- bid/ask, fair probability, edge, spread, spot/price-to-beat distance
 - trade/skip decision and reason
 - latency per asset cycle
 - event log
