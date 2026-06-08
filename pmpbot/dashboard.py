@@ -61,7 +61,7 @@ HTML = r"""
   </section>
 
 <script>
-let state = {health:{}, markets:{}, events:[], config:{}};
+let state = {health:{}, markets:{}, positions:{}, events:[], config:{}};
 const fmt = (x, d=2) => (x === undefined || x === null || Number.isNaN(x)) ? '—' : Number(x).toFixed(d);
 const cents = x => (x === undefined || x === null) ? '—' : (Number(x)*100).toFixed(1) + '¢';
 const price = x => (x === undefined || x === null) ? '—' : Number(x).toFixed(3);
@@ -71,12 +71,13 @@ function recomputePnl() {
   const pnl = {overall_pnl_usd:0, overall_charges_usd:0, assets:{}};
   for (const asset of assets) {
     const m = (state.markets || {})[asset] || {};
-    const pos = m.position || {};
-    const used = Number(m.dry_used_capital_usd ?? pos.notional_usd ?? 0);
+    const positions = Object.values(state.positions || {}).filter(p => p.asset === asset);
+    const pos = positions[positions.length - 1] || m.position || {};
+    const used = positions.filter(p => (p.status || 'open') === 'open').reduce((a,p)=>a+Number(p.notional_usd||0),0);
     const capital = Number(m.dry_capital_usd ?? ((state.config||{}).dry_capital_per_asset_usd) ?? 10);
-    const p = Number(pos.pnl_usd ?? m.position_pnl_usd ?? 0);
-    const c = Number(pos.charges_usd ?? m.position_charges_usd ?? 0);
-    pnl.assets[asset] = {capital_usd:capital, used_capital_usd:used, available_capital_usd:Math.max(0, capital-used), pnl_usd:p, charges_usd:c, position: Object.keys(pos).length ? pos : null};
+    const p = positions.length ? positions.reduce((a,x)=>a+Number(x.pnl_usd||0),0) : Number(pos.pnl_usd ?? m.position_pnl_usd ?? 0);
+    const c = positions.length ? positions.reduce((a,x)=>a+Number(x.charges_usd||0),0) : Number(pos.charges_usd ?? m.position_charges_usd ?? 0);
+    pnl.assets[asset] = {capital_usd:capital, used_capital_usd:used, available_capital_usd:Math.max(0, capital-used), pnl_usd:p, charges_usd:c, positions, position: Object.keys(pos).length ? pos : null};
     pnl.overall_pnl_usd += p; pnl.overall_charges_usd += c;
   }
   const previousAssets = ((state.pnl || {}).assets || {});
@@ -156,7 +157,11 @@ async function boot() {
   ws.onmessage = msg => {
     const event = JSON.parse(msg.data);
     state.events = [event, ...(state.events || [])].slice(0,100);
-    if (event.asset) state.markets[event.asset] = mergeMarketEvent(event.asset, event);
+    if (event.asset) {
+      state.markets[event.asset] = mergeMarketEvent(event.asset, event);
+      const pos = state.markets[event.asset].position;
+      if (pos) state.positions[`${pos.asset || event.asset}:${pos.window || event.window || 'unknown'}`] = pos;
+    }
     recomputePnl();
     state.health.last_update = event.ts;
     state.health.status = 'running';
@@ -175,6 +180,7 @@ def create_app() -> FastAPI:
     settings = Settings.load()
     dash_state = DashboardState(settings)
     engine = BotEngine(settings, event_sink=dash_state.publish)
+    dash_state.load_positions(engine.state.data.get("positions", {}))
     task: asyncio.Task | None = None
 
     @asynccontextmanager

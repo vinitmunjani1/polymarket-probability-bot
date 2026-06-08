@@ -20,6 +20,7 @@ class DashboardState:
         self.settings = settings
         self.events: deque[dict[str, Any]] = deque(maxlen=max_events)
         self.markets: dict[str, dict[str, Any]] = {}
+        self.positions: dict[str, dict[str, Any]] = {}
         self.health: dict[str, Any] = {
             "mode": settings.execution_mode,
             "status": "starting",
@@ -46,6 +47,9 @@ class DashboardState:
         if asset := event.get("asset"):
             asset_key = str(asset)
             self.markets[asset_key] = self._merge_market_event(asset_key, event)
+            if position := self.markets[asset_key].get("position"):
+                position_key = f"{position.get('asset', asset_key)}:{position.get('window', event.get('window', 'unknown'))}"
+                self.positions[position_key] = position
             self._recompute_pnl()
         for queue in list(self._subscribers):
             try:
@@ -58,9 +62,15 @@ class DashboardState:
             "health": self.health,
             "config": self._settings_dict(),
             "markets": self.markets,
+            "positions": self.positions,
             "pnl": self.pnl,
             "events": list(self.events)[:100],
         }
+
+    def load_positions(self, positions: dict[str, dict[str, Any]]) -> None:
+        """Seed dashboard PnL from persisted dry-run state on startup."""
+        self.positions.update(positions or {})
+        self._recompute_pnl()
 
     def subscribe(self) -> asyncio.Queue:
         queue: asyncio.Queue = asyncio.Queue(maxsize=100)
@@ -108,18 +118,18 @@ class DashboardState:
         total_pnl = 0.0
         total_charges = 0.0
         for asset in self.settings.assets:
-            event = self.markets.get(asset, {})
-            position = event.get("position") or {}
-            pnl = float(position.get("pnl_usd") or 0.0)
-            charges = float(position.get("charges_usd") or 0.0)
-            used = float(event.get("dry_used_capital_usd") or position.get("notional_usd") or 0.0)
+            asset_positions = [p for p in self.positions.values() if p.get("asset") == asset]
+            pnl = sum(float(p.get("pnl_usd") or 0.0) for p in asset_positions)
+            charges = sum(float(p.get("charges_usd") or 0.0) for p in asset_positions)
+            used = sum(float(p.get("notional_usd") or 0.0) for p in asset_positions if p.get("status", "open") == "open")
             assets[asset] = {
                 "capital_usd": self.settings.dry_capital_per_asset_usd,
                 "used_capital_usd": used,
                 "available_capital_usd": max(0.0, self.settings.dry_capital_per_asset_usd - used),
                 "pnl_usd": pnl,
                 "charges_usd": charges,
-                "position": position or None,
+                "positions": asset_positions,
+                "position": asset_positions[-1] if asset_positions else None,
             }
             total_pnl += pnl
             total_charges += charges
