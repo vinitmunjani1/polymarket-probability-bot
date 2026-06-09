@@ -6,4 +6,5 @@ __pycache__/
 *.pyc
 state.json
 clob_api_creds.json
+clob_api_creds_v2.json
 *.log

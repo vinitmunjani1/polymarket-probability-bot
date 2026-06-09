@@ -22,7 +22,7 @@ The bot is split into focused modules so the 5-minute market loop stays fast:
 Trading rule v0:
 
 - wait until chosen side ask is at least `MIN_SIGNAL_PRICE=0.80`
-- buy immediately at the current ask using market-style execution
+- buy immediately using py-clob-client-v2 market-order execution in live mode
 - skip any candidate above `MAX_ENTRY_PRICE=0.90`
 - never trade above `MAX_ENTRY_PRICE=0.90`
 - sell immediately if held side bid/mark falls to `STOP_LOSS_PRICE=0.49` or lower
@@ -85,3 +85,21 @@ Dashboard v0 includes:
 ## Live mode
 
 Set `EXECUTION_MODE=live` and wallet/CLOB env vars. The bot will still cap each order intent to `$1` and skip duplicate trades per asset/window.
+
+Live execution uses `py-clob-client-v2`:
+
+- buys use FOK market orders for the configured USDC notional
+- stop-loss sells use FAK market orders for held shares
+- supported signature modes: `EOA`/`0`, `POLY_PROXY`/`1`, `POLY_GNOSIS_SAFE`/`2`, `POLY_1271`/`3`
+
+Example v2 / EIP-1271-style config:
+
+```env
+EXECUTION_MODE=live
+ORDER_NOTIONAL_USD=1.00
+ASSETS=BTC
+POLYMARKET_PRIVATE_KEY=...
+POLYMARKET_FUNDER=...
+POLYMARKET_SIGNATURE_TYPE=POLY_1271
+CLOB_API_CREDS_PATH=./clob_api_creds_v2.json
+```

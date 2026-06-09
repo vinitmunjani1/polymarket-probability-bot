@@ -33,50 +33,84 @@ class LiveExecutor:
         self.max_notional_usd = min(1.0, float(max_notional_usd))
         self._client = None
 
+    @staticmethod
+    def _signature_type(raw: str | None):
+        from py_clob_client_v2 import SignatureTypeV2
+
+        value = (raw or "0").strip().upper()
+        aliases = {
+            "": SignatureTypeV2.EOA,
+            "0": SignatureTypeV2.EOA,
+            "EOA": SignatureTypeV2.EOA,
+            "1": SignatureTypeV2.POLY_PROXY,
+            "POLY_PROXY": SignatureTypeV2.POLY_PROXY,
+            "PROXY": SignatureTypeV2.POLY_PROXY,
+            "MAGIC": SignatureTypeV2.POLY_PROXY,
+            "EMAIL": SignatureTypeV2.POLY_PROXY,
+            "2": SignatureTypeV2.POLY_GNOSIS_SAFE,
+            "POLY_GNOSIS_SAFE": SignatureTypeV2.POLY_GNOSIS_SAFE,
+            "GNOSIS_SAFE": SignatureTypeV2.POLY_GNOSIS_SAFE,
+            "SAFE": SignatureTypeV2.POLY_GNOSIS_SAFE,
+            "3": SignatureTypeV2.POLY_1271,
+            "POLY_1271": SignatureTypeV2.POLY_1271,
+            "1271": SignatureTypeV2.POLY_1271,
+            "EIP_1271": SignatureTypeV2.POLY_1271,
+            "EIP1271": SignatureTypeV2.POLY_1271,
+        }
+        if value not in aliases:
+            raise RuntimeError(f"unsupported POLYMARKET_SIGNATURE_TYPE={raw!r}; use EOA/0, POLY_PROXY/1, POLY_GNOSIS_SAFE/2, or POLY_1271/3")
+        return aliases[value]
+
     def _client_or_create(self):
         if self._client:
             return self._client
-        from py_clob_client.client import ClobClient
-        from py_clob_client.clob_types import ApiCreds
-        from py_clob_client.constants import POLYGON
+        from py_clob_client_v2 import ApiCreds, ClobClient
 
         key = os.getenv("POLYMARKET_PRIVATE_KEY", "").strip()
         funder = os.getenv("POLYMARKET_FUNDER", "").strip()
-        sig = int(os.getenv("POLYMARKET_SIGNATURE_TYPE", "1"))
-        chain_id = int(os.getenv("CHAIN_ID", str(POLYGON)))
-        if not key or not funder:
-            raise RuntimeError("missing POLYMARKET_PRIVATE_KEY/POLYMARKET_FUNDER for live mode")
-        tmp = ClobClient(self.clob_host, chain_id=chain_id, key=key, signature_type=sig, funder=funder)
-        cred_path = Path(os.getenv("CLOB_API_CREDS_PATH", "clob_api_creds.json"))
+        sig = self._signature_type(os.getenv("POLYMARKET_SIGNATURE_TYPE", "POLY_PROXY"))
+        chain_id = int(os.getenv("CHAIN_ID", "137"))
+        if not key:
+            raise RuntimeError("missing POLYMARKET_PRIVATE_KEY for live mode")
+        if sig.name != "EOA" and not funder:
+            raise RuntimeError("missing POLYMARKET_FUNDER for non-EOA live signature mode")
+        client_kwargs = {"host": self.clob_host, "chain_id": chain_id, "key": key, "signature_type": sig}
+        if funder:
+            client_kwargs["funder"] = funder
+        tmp = ClobClient(**client_kwargs)
+        cred_path = Path(os.getenv("CLOB_API_CREDS_PATH", "clob_api_creds_v2.json"))
         if cred_path.exists():
             c = json.loads(cred_path.read_text())
-            creds = ApiCreds(c.get("apiKey") or c.get("api_key"), c.get("secret") or c.get("api_secret"), c.get("passphrase") or c.get("api_passphrase"))
+            creds = ApiCreds(
+                c.get("apiKey") or c.get("api_key"),
+                c.get("secret") or c.get("api_secret"),
+                c.get("passphrase") or c.get("api_passphrase"),
+            )
         else:
-            raw = tmp.create_or_derive_api_creds()
+            raw = tmp.create_or_derive_api_key()
             creds = ApiCreds(raw.api_key, raw.api_secret, raw.api_passphrase)
             cred_path.write_text(json.dumps({"api_key": raw.api_key, "api_secret": raw.api_secret, "api_passphrase": raw.api_passphrase}, indent=2))
-        self._client = ClobClient(self.clob_host, chain_id=chain_id, key=key, creds=creds, signature_type=sig, funder=funder)
+        self._client = ClobClient(**client_kwargs, creds=creds, retry_on_error=True)
         return self._client
 
     def buy(self, token_id: str, price: float) -> dict[str, Any]:
-        from py_clob_client.order_builder.constants import BUY
+        from py_clob_client_v2 import MarketOrderArgs, OrderType, Side
 
-        size = math.floor((self.max_notional_usd / price) * 10000) / 10000
-        if size <= 0 or size * price > 1.0001:
-            raise RuntimeError(f"invalid $1-capped size={size} price={price}")
-        return self._post(token_id=token_id, price=price, size=size, side=BUY)
+        amount = math.floor(self.max_notional_usd * 10000) / 10000
+        if amount <= 0 or amount > 1.0001:
+            raise RuntimeError(f"invalid $1-capped buy amount={amount}")
+        return self._client_or_create().create_and_post_market_order(
+            MarketOrderArgs(token_id=token_id, amount=amount, side=Side.BUY, price=price, order_type=OrderType.FOK),
+            order_type=OrderType.FOK,
+        )
 
     def sell(self, token_id: str, price: float, size: float) -> dict[str, Any]:
-        from py_clob_client.order_builder.constants import SELL
+        from py_clob_client_v2 import MarketOrderArgs, OrderType, Side
 
         size = math.floor(float(size) * 10000) / 10000
         if size <= 0:
             raise RuntimeError(f"invalid sell size={size}")
-        return self._post(token_id=token_id, price=price, size=size, side=SELL)
-
-    def _post(self, *, token_id: str, price: float, size: float, side: str) -> dict[str, Any]:
-        from py_clob_client.clob_types import OrderArgs
-
-        client = self._client_or_create()
-        order = client.create_order(OrderArgs(token_id=token_id, price=price, size=size, side=side, expiration=0))
-        return client.post_order(order, orderType="GTC", post_only=False)
+        return self._client_or_create().create_and_post_market_order(
+            MarketOrderArgs(token_id=token_id, amount=size, side=Side.SELL, price=price, order_type=OrderType.FAK),
+            order_type=OrderType.FAK,
+        )
