@@ -29,11 +29,13 @@ class BotEngine:
         self.vatic = VaticPriceFeed(self.http)
         self.executor = LiveExecutor(settings.clob_host, settings.order_notional_usd)
         self.event_sink = event_sink
+        self._settlement_pending_notified: set[str] = set()
 
     async def close(self) -> None:
         await self.http.aclose()
 
     async def run_once(self) -> None:
+        await self.settle_open_positions()
         await asyncio.gather(*(self.evaluate_asset(asset) for asset in self.s.assets))
 
     async def run_forever(self) -> None:
@@ -173,6 +175,62 @@ class BotEngine:
             log["dry_used_capital_usd"] = self.state.asset_open_notional(asset)
             log.update(self._position_metrics(position, candidate.side, up_book, down_book))
         self._emit(log)
+
+    async def settle_open_positions(self) -> None:
+        """Settle expired/open positions using Gamma resolution data.
+
+        The trading book can disappear or freeze near 0.98 when bidding closes.
+        PnL must wait for the resolved outcome and close at binary value 1/0.
+        """
+        positions = list(self.state.data.setdefault("positions", {}).values())
+        tasks = [self._settle_position_if_resolved(p) for p in positions if p.get("status", "open") == "open"]
+        if tasks:
+            await asyncio.gather(*tasks)
+
+    async def _settle_position_if_resolved(self, position: dict) -> None:
+        slug = position.get("slug")
+        asset = position.get("asset")
+        window = position.get("window")
+        if not slug or not asset or window is None:
+            return
+        # Avoid extra calls for active windows; this is only settlement logic.
+        if time.time() < int(window) + int(self.s.window_seconds):
+            return
+        raw = await self.discovery.market_by_slug(str(slug))
+        if not raw:
+            return
+        exit_price = self.discovery.resolved_token_price(
+            raw,
+            token_id=position.get("token_id"),
+            side=position.get("side"),
+        )
+        if exit_price is None:
+            key = f"{asset}:{window}"
+            if key not in self._settlement_pending_notified:
+                self._settlement_pending_notified.add(key)
+                self._emit({
+                    "event": "settlement_pending",
+                    "asset": asset,
+                    "window": window,
+                    "slug": slug,
+                    "dry_order_status": "settlement_pending",
+                    "reason": "market_not_resolved_yet",
+                    "settlement_status": "waiting_for_gamma_resolution",
+                    **self._position_metrics(position, position.get("side"), None, None),
+                })
+            return
+        closed = self.state.close_position(str(asset), int(window), exit_price=exit_price, exit_reason="resolved")
+        self._settlement_pending_notified.discard(f"{asset}:{window}")
+        self._emit({
+            "event": "position_settled",
+            "asset": asset,
+            "window": window,
+            "slug": slug,
+            "settlement_price": exit_price,
+            "dry_order_status": closed.get("status"),
+            "dry_used_capital_usd": self.state.asset_open_notional(str(asset)),
+            **self._position_metrics(closed, closed.get("side"), None, None),
+        })
 
     def _dry_charges(self, notional: float) -> float:
         return float(self.s.dry_fixed_charge_usd) + float(notional) * float(self.s.dry_charge_rate_bps) / 10_000.0
