@@ -71,11 +71,37 @@ class BotEngine:
             self._emit({"event": "skip_time_gate", "asset": asset, "seconds_left": seconds_left, "latency_ms": self._latency(loop_start)})
             return
 
+        up_book_task = asyncio.create_task(self.clob.book(market.token_up))
+        down_book_task = asyncio.create_task(self.clob.book(market.token_down))
+
+        # Existing positions must be risk-managed even when the signal/oracle
+        # path is unavailable. Previously a missing price-to-beat or empty new
+        # candidate could skip the stop-loss sell entirely, leaving live holds
+        # open below STOP_LOSS_PRICE.
+        if existing_position:
+            up_book, down_book = await asyncio.gather(up_book_task, down_book_task)
+            log = {
+                "asset": asset,
+                "window": start,
+                "slug": market.slug,
+                "event": "market_snapshot",
+                "reason": "already_ordered_window",
+                "dry_order_status": existing_position.get("status", "open"),
+                "dry_capital_usd": self.state.asset_dry_equity(asset, self.s.dry_capital_per_asset_usd),
+                "dry_used_capital_usd": self.state.asset_open_notional(asset),
+                "dry_available_capital_usd": self.state.asset_available_notional(asset, self.s.dry_capital_per_asset_usd),
+                "latency_ms": self._latency(loop_start),
+            }
+            log.update(self._position_metrics(existing_position, existing_position.get("side"), up_book, down_book))
+            if self._should_stop_loss(log.get("position")):
+                stop_event = self._stop_loss_exit(asset, start, existing_position, log.get("position") or {}, up_book, down_book)
+                log.update(stop_event)
+            self._emit(log)
+            return
+
         # Fetch oracle target and both books concurrently. Features depend on
         # the oracle target, but books do not, so start all network I/O now.
         price_to_beat_task = asyncio.create_task(self.vatic.price_to_beat(asset, market.start_ts, "5min"))
-        up_book_task = asyncio.create_task(self.clob.book(market.token_up))
-        down_book_task = asyncio.create_task(self.clob.book(market.token_down))
 
         price_to_beat = await price_to_beat_task
         if not price_to_beat:
@@ -118,16 +144,6 @@ class BotEngine:
             "dry_available_capital_usd": self.state.asset_available_notional(asset, self.s.dry_capital_per_asset_usd),
             "latency_ms": self._latency(loop_start),
         }
-        if existing_position:
-            log.update({"event": "market_snapshot", "reason": "already_ordered_window"})
-            log.update(self._position_metrics(existing_position, candidate.side, up_book, down_book))
-            log["dry_order_status"] = existing_position.get("status", "open")
-            if self._should_stop_loss(log.get("position")):
-                stop_event = self._stop_loss_exit(asset, start, existing_position, log.get("position") or {}, up_book, down_book)
-                log.update(stop_event)
-            self._emit(log)
-            return
-
         if already_ordered:
             # Legacy/order-count state without a recorded position: do not spam duplicate skips.
             log.update({"event": "market_snapshot", "reason": "already_ordered_window"})
