@@ -37,14 +37,38 @@ class Settings:
     binance_api: str = "https://api.binance.com"
     http_timeout_seconds: float = 4.0
 
+    @staticmethod
+    def _load_env() -> Path:
+        """Load env vars from the project .env regardless of launch cwd.
+
+        `python-dotenv`'s default lookup can miss `.env` when the dashboard is
+        started by a process manager or from a different working directory. In
+        that case EXECUTION_MODE silently falls back to dry-run. Prefer the repo
+        root `.env`, while still allowing real environment variables to override
+        file values.
+        """
+        project_env = Path(__file__).resolve().parents[1] / ".env"
+        load_dotenv(project_env, override=False)
+        load_dotenv(override=False)
+        return project_env
+
+    @staticmethod
+    def _execution_mode() -> str:
+        mode = os.getenv("EXECUTION_MODE", "dry-run").strip().lower()
+        aliases = {"dryrun": "dry-run", "dry_run": "dry-run", "paper": "dry-run", "live": "live"}
+        mode = aliases.get(mode, mode)
+        if mode not in {"dry-run", "live"}:
+            raise ValueError("EXECUTION_MODE must be 'dry-run' or 'live'")
+        return mode
+
     @classmethod
     def load(cls) -> "Settings":
-        load_dotenv()
+        cls._load_env()
         assets = [a.strip().upper() for a in os.getenv("ASSETS", "BTC,ETH,SOL,XRP").split(",") if a.strip()]
         return cls(
             assets=assets,
             window_seconds=int(os.getenv("WINDOW_SECONDS", "300")),
-            execution_mode=os.getenv("EXECUTION_MODE", "dry-run").strip().lower(),
+            execution_mode=cls._execution_mode(),
             order_notional_usd=float(os.getenv("ORDER_NOTIONAL_USD", "1.0")),
             dry_capital_per_asset_usd=float(os.getenv("DRY_CAPITAL_PER_ASSET_USD", "10.0")),
             dry_charge_rate_bps=float(os.getenv("DRY_CHARGE_RATE_BPS", "0.0")),

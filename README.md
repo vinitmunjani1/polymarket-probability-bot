@@ -103,3 +103,7 @@ POLYMARKET_FUNDER=...
 POLYMARKET_SIGNATURE_TYPE=POLY_1271
 CLOB_API_CREDS_PATH=./clob_api_creds_v2.json
 ```
+
+On startup the CLI/dashboard emits a `settings_loaded` event with the loaded
+mode and `.env` path. If it still says `dry-run`, confirm `.env` exists in the
+repo root and contains `EXECUTION_MODE=live` exactly.

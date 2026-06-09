@@ -257,6 +257,12 @@ boot();
 def create_app() -> FastAPI:
     settings = Settings.load()
     dash_state = DashboardState(settings)
+    dash_state.publish({
+        "event": "settings_loaded",
+        "mode": settings.execution_mode,
+        "assets": settings.assets,
+        "env_path": str(Settings._load_env()),
+    })
     engine = BotEngine(settings, event_sink=dash_state.publish)
     dash_state.load_positions(engine.state.data.get("positions", {}))
     task: asyncio.Task | None = None

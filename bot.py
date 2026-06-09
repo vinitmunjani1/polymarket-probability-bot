@@ -13,7 +13,9 @@ async def amain() -> None:
     parser.add_argument("--once", action="store_true", help="run one evaluation cycle and exit")
     args = parser.parse_args()
 
-    engine = BotEngine(Settings.load())
+    settings = Settings.load()
+    print(f"settings_loaded mode={settings.execution_mode} assets={','.join(settings.assets)} env_path={Settings._load_env()}", flush=True)
+    engine = BotEngine(settings)
     try:
         if args.once:
             await engine.run_once()
