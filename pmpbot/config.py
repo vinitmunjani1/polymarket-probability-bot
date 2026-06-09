@@ -22,6 +22,8 @@ class Settings:
     dry_charge_rate_bps: float = 0.0
     dry_fixed_charge_usd: float = 0.0
     min_signal_price: float = 0.80
+    require_signal_edge_confirmation: bool = True
+    min_confirmation_edge_cents: float = 0.0
     stop_loss_price: float = 0.49
     trade_trigger_mode: str = "signal"
     max_orders_per_market_window: int = 1
@@ -61,6 +63,13 @@ class Settings:
             raise ValueError("EXECUTION_MODE must be 'dry-run' or 'live'")
         return mode
 
+    @staticmethod
+    def _bool_env(name: str, default: bool) -> bool:
+        raw = os.getenv(name)
+        if raw is None:
+            return default
+        return raw.strip().lower() in {"1", "true", "yes", "y", "on"}
+
     @classmethod
     def load(cls) -> "Settings":
         cls._load_env()
@@ -74,6 +83,8 @@ class Settings:
             dry_charge_rate_bps=float(os.getenv("DRY_CHARGE_RATE_BPS", "0.0")),
             dry_fixed_charge_usd=float(os.getenv("DRY_FIXED_CHARGE_USD", "0.0")),
             min_signal_price=float(os.getenv("MIN_SIGNAL_PRICE", "0.80")),
+            require_signal_edge_confirmation=cls._bool_env("REQUIRE_SIGNAL_EDGE_CONFIRMATION", True),
+            min_confirmation_edge_cents=float(os.getenv("MIN_CONFIRMATION_EDGE_CENTS", "0.0")),
             stop_loss_price=float(os.getenv("STOP_LOSS_PRICE", "0.49")),
             trade_trigger_mode=os.getenv("TRADE_TRIGGER_MODE", "signal").strip().lower(),
             max_orders_per_market_window=int(os.getenv("MAX_ORDERS_PER_MARKET_WINDOW", "1")),

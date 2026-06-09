@@ -22,6 +22,8 @@ The bot is split into focused modules so the 5-minute market loop stays fast:
 Trading rule v0:
 
 - wait until chosen side ask is at least `MIN_SIGNAL_PRICE=0.80`
+- require signal trades to be confirmed by non-negative model edge by default,
+  avoiding sudden side-reversal/chase entries
 - buy immediately using py-clob-client-v2 market-order execution in live mode
 - skip any candidate above `MAX_ENTRY_PRICE=0.90`
 - never trade above `MAX_ENTRY_PRICE=0.90`
@@ -102,6 +104,18 @@ POLYMARKET_PRIVATE_KEY=...
 POLYMARKET_FUNDER=...
 POLYMARKET_SIGNATURE_TYPE=POLY_1271
 CLOB_API_CREDS_PATH=./clob_api_creds_v2.json
+```
+
+To make reversal protection stricter, increase:
+
+```env
+MIN_CONFIRMATION_EDGE_CENTS=1.0
+```
+
+To restore old behavior, set:
+
+```env
+REQUIRE_SIGNAL_EDGE_CONFIRMATION=false
 ```
 
 On startup the CLI/dashboard emits a `settings_loaded` event with the loaded
