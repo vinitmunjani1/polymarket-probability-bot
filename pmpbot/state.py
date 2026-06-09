@@ -52,5 +52,25 @@ class State:
         self.save()
         return position
 
+    def close_position(self, asset: str, window: int, *, exit_price: float, exit_reason: str, charges_usd: float = 0.0) -> dict[str, Any]:
+        key = f"{asset}:{window}"
+        position = self.data.setdefault("positions", {}).get(key)
+        if not position:
+            raise KeyError(f"missing position {key}")
+        shares = float(position.get("shares", 0.0))
+        notional = float(position.get("notional_usd", 0.0))
+        total_charges = float(position.get("charges_usd", 0.0)) + float(charges_usd)
+        exit_value = shares * float(exit_price)
+        position.update({
+            "status": "closed",
+            "exit_price": float(exit_price),
+            "exit_value_usd": exit_value,
+            "exit_reason": exit_reason,
+            "charges_usd": total_charges,
+            "pnl_usd": exit_value - notional - total_charges,
+        })
+        self.save()
+        return position
+
     def save(self) -> None:
         self.path.write_text(json.dumps(self.data, indent=2, sort_keys=True))

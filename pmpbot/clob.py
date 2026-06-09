@@ -59,12 +59,24 @@ class LiveExecutor:
         return self._client
 
     def buy(self, token_id: str, price: float) -> dict[str, Any]:
-        from py_clob_client.clob_types import OrderArgs
         from py_clob_client.order_builder.constants import BUY
 
         size = math.floor((self.max_notional_usd / price) * 10000) / 10000
         if size <= 0 or size * price > 1.0001:
             raise RuntimeError(f"invalid $1-capped size={size} price={price}")
+        return self._post(token_id=token_id, price=price, size=size, side=BUY)
+
+    def sell(self, token_id: str, price: float, size: float) -> dict[str, Any]:
+        from py_clob_client.order_builder.constants import SELL
+
+        size = math.floor(float(size) * 10000) / 10000
+        if size <= 0:
+            raise RuntimeError(f"invalid sell size={size}")
+        return self._post(token_id=token_id, price=price, size=size, side=SELL)
+
+    def _post(self, *, token_id: str, price: float, size: float, side: str) -> dict[str, Any]:
+        from py_clob_client.clob_types import OrderArgs
+
         client = self._client_or_create()
-        order = client.create_order(OrderArgs(token_id=token_id, price=price, size=size, side=BUY, expiration=0))
+        order = client.create_order(OrderArgs(token_id=token_id, price=price, size=size, side=side, expiration=0))
         return client.post_order(order, orderType="GTC", post_only=False)

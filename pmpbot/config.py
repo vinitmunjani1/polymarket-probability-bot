@@ -22,6 +22,7 @@ class Settings:
     dry_charge_rate_bps: float = 0.0
     dry_fixed_charge_usd: float = 0.0
     min_signal_price: float = 0.80
+    stop_loss_price: float = 0.49
     trade_trigger_mode: str = "signal"
     max_orders_per_market_window: int = 1
     min_edge_cents: float = 3.0
@@ -49,6 +50,7 @@ class Settings:
             dry_charge_rate_bps=float(os.getenv("DRY_CHARGE_RATE_BPS", "0.0")),
             dry_fixed_charge_usd=float(os.getenv("DRY_FIXED_CHARGE_USD", "0.0")),
             min_signal_price=float(os.getenv("MIN_SIGNAL_PRICE", "0.80")),
+            stop_loss_price=float(os.getenv("STOP_LOSS_PRICE", "0.49")),
             trade_trigger_mode=os.getenv("TRADE_TRIGGER_MODE", "signal").strip().lower(),
             max_orders_per_market_window=int(os.getenv("MAX_ORDERS_PER_MARKET_WINDOW", "1")),
             min_edge_cents=float(os.getenv("MIN_EDGE_CENTS", "3.0")),

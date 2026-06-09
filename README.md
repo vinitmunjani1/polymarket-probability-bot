@@ -25,6 +25,7 @@ Trading rule v0:
 - buy immediately at the current ask using market-style execution
 - skip any candidate above `MAX_ENTRY_PRICE=0.90`
 - never trade above `MAX_ENTRY_PRICE=0.90`
+- sell immediately if held side bid/mark falls to `STOP_LOSS_PRICE=0.49` or lower
 - dry capital starts at `$10` per asset and overall equity updates with PnL
 
 Price-to-beat:

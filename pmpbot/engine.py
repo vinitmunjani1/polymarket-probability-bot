@@ -109,6 +109,9 @@ class BotEngine:
             log.update({"event": "market_snapshot", "reason": "already_ordered_window"})
             log.update(self._position_metrics(existing_position, candidate.side, up_book, down_book))
             log["dry_order_status"] = existing_position.get("status", "open")
+            if self._should_stop_loss(log.get("position")):
+                stop_event = self._stop_loss_exit(asset, start, existing_position, log.get("position") or {}, up_book, down_book)
+                log.update(stop_event)
             self._emit(log)
             return
 
@@ -132,13 +135,27 @@ class BotEngine:
 
         log["event"] = "order_intent"
         log["dry_order_status"] = "open"
+        charges = self._dry_charges(notional)
         if self.s.execution_mode == "live":
             # Polymarket CLOB has no pure market order; this is an aggressive
             # limit at the current ask with post_only=False, i.e. market-style.
             log["live_response"] = self.executor.buy(candidate.token_id, execution_price)
+            position = self.state.record_position(
+                asset=asset,
+                window=start,
+                slug=market.slug,
+                side=candidate.side,
+                token_id=candidate.token_id,
+                entry_price=execution_price,
+                notional_usd=notional,
+                charges_usd=charges,
+                status="open",
+                trigger_price=candidate.book.ask,
+            )
             self.state.record_order(asset, start)
+            log["dry_used_capital_usd"] = self.state.asset_open_notional(asset)
+            log.update(self._position_metrics(position, candidate.side, up_book, down_book))
         else:
-            charges = self._dry_charges(notional)
             position = self.state.record_position(
                 asset=asset,
                 window=start,
@@ -160,6 +177,35 @@ class BotEngine:
     def _dry_charges(self, notional: float) -> float:
         return float(self.s.dry_fixed_charge_usd) + float(notional) * float(self.s.dry_charge_rate_bps) / 10_000.0
 
+    def _should_stop_loss(self, marked_position: dict | None) -> bool:
+        if not marked_position or marked_position.get("status") != "open":
+            return False
+        mark_price = marked_position.get("mark_price")
+        return mark_price is not None and float(mark_price) <= float(self.s.stop_loss_price)
+
+    def _stop_loss_exit(self, asset: str, window: int, position: dict, marked_position: dict, up_book, down_book) -> dict:
+        held_side = position.get("side")
+        held_book = up_book if held_side == "UP" else down_book
+        exit_price = float(marked_position.get("mark_price") or 0.0)
+        event = {
+            "event": "stop_loss_sell",
+            "reason": "stop_loss_hit",
+            "stop_loss_price": self.s.stop_loss_price,
+            "sell_price": exit_price,
+            "execution_type": "market_sell",
+        }
+        if self.s.execution_mode == "live" and held_book:
+            event["live_sell_response"] = self.executor.sell(
+                token_id=position["token_id"],
+                price=exit_price,
+                size=float(position.get("shares", 0.0)),
+            )
+        closed = self.state.close_position(asset, window, exit_price=exit_price, exit_reason="stop_loss_hit")
+        event["dry_order_status"] = closed.get("status")
+        event.update(self._position_metrics(closed, held_side, up_book, down_book))
+        event["dry_used_capital_usd"] = self.state.asset_open_notional(asset)
+        return event
+
     @staticmethod
     def _position_metrics(position: dict, candidate_side: str, up_book, down_book) -> dict:
         held_side = position.get("side")
@@ -168,8 +214,13 @@ class BotEngine:
         shares = float(position.get("shares", 0.0))
         notional = float(position.get("notional_usd", 0.0))
         charges = float(position.get("charges_usd", 0.0))
-        mark_value = None if mark_price is None else shares * float(mark_price)
-        pnl = None if mark_value is None else mark_value - notional - charges
+        if position.get("status") == "closed" and position.get("exit_price") is not None:
+            mark_price = float(position.get("exit_price"))
+            mark_value = float(position.get("exit_value_usd", shares * mark_price))
+            pnl = float(position.get("pnl_usd", mark_value - notional - charges))
+        else:
+            mark_value = None if mark_price is None else shares * float(mark_price)
+            pnl = None if mark_value is None else mark_value - notional - charges
         return {
             "position": {
                 **position,
