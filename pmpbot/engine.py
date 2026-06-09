@@ -41,7 +41,17 @@ class BotEngine:
     async def run_forever(self) -> None:
         while True:
             started = time.perf_counter()
-            await self.run_once()
+            try:
+                await self.run_once()
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                self._emit({
+                    "event": "engine_error",
+                    "error": str(e),
+                    "error_type": type(e).__name__,
+                    "latency_ms": self._latency(started),
+                })
             # Fast enough for 5m markets, but avoid hammering APIs unnecessarily.
             await asyncio.sleep(max(0.5, 2.0 - (time.perf_counter() - started)))
 

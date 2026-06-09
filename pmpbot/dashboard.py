@@ -265,6 +265,20 @@ def create_app() -> FastAPI:
     async def lifespan(app: FastAPI):
         nonlocal task
         task = asyncio.create_task(engine.run_forever())
+        def _engine_done(done_task: asyncio.Task) -> None:
+            if done_task.cancelled():
+                return
+            try:
+                exc = done_task.exception()
+            except asyncio.CancelledError:
+                return
+            if exc:
+                dash_state.publish({"event": "engine_task_stopped", "error": str(exc), "error_type": type(exc).__name__})
+                dash_state.health["status"] = "engine_error"
+            else:
+                dash_state.publish({"event": "engine_task_stopped", "reason": "completed_unexpectedly"})
+                dash_state.health["status"] = "engine_stopped"
+        task.add_done_callback(_engine_done)
         try:
             yield
         finally:
