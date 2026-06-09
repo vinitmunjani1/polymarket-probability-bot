@@ -87,6 +87,13 @@ Dashboard v0 includes:
 - event log
 - current config view
 
+Capital accounting:
+
+- when an order is opened, its notional is moved from available cash to used capital
+- when the market resolves or stop-loss closes, the settlement/sale value returns
+  to available cash
+- realized PnL is therefore reflected in the next available-cash balance
+
 ## Live mode
 
 Set `EXECUTION_MODE=live` and wallet/CLOB env vars. The bot will still cap each order intent to `$1` and skip duplicate trades per asset/window.

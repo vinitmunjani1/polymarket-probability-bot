@@ -78,9 +78,12 @@ function recomputePnl() {
     overallUsed += used;
     const capital = Number(m.dry_capital_usd ?? ((state.config||{}).dry_capital_per_asset_usd) ?? 10);
     const p = positions.length ? positions.reduce((a,x)=>a+Number(x.pnl_usd||0),0) : Number(pos.pnl_usd ?? m.position_pnl_usd ?? 0);
+    const realizedPnl = positions.reduce((a,x)=>a+((x.status === 'closed') ? Number(x.pnl_usd||0) : 0),0);
     const c = positions.length ? positions.reduce((a,x)=>a+Number(x.charges_usd||0),0) : Number(pos.charges_usd ?? m.position_charges_usd ?? 0);
     const equity = capital + p;
-    pnl.assets[asset] = {capital_usd:capital, equity_usd:equity, used_capital_usd:used, available_capital_usd:Math.max(0, equity-used), pnl_usd:p, charges_usd:c, positions, position: Object.keys(pos).length ? pos : null};
+    const settledCash = capital + realizedPnl;
+    const cash = settledCash - used;
+    pnl.assets[asset] = {capital_usd:capital, equity_usd:equity, settled_cash_usd:settledCash, cash_balance_usd:cash, used_capital_usd:used, available_capital_usd:Math.max(0, cash), pnl_usd:p, charges_usd:c, positions, position: Object.keys(pos).length ? pos : null};
     pnl.overall_pnl_usd += p; pnl.overall_charges_usd += c;
   }
   const totalCapital = Number(((state.config||{}).dry_capital_per_asset_usd) || 10) * assets.length;
@@ -99,9 +102,11 @@ function recomputePnl() {
   state.pnl.overall_pnl_usd = Object.values(state.pnl.assets).reduce((a,x)=>a+Number(x.pnl_usd||0),0);
   state.pnl.overall_charges_usd = Object.values(state.pnl.assets).reduce((a,x)=>a+Number(x.charges_usd||0),0);
   state.pnl.overall_used_capital_usd = Object.values(state.pnl.assets).reduce((a,x)=>a+Number(x.used_capital_usd||0),0);
+  state.pnl.overall_cash_balance_usd = Object.values(state.pnl.assets).reduce((a,x)=>a+Number(x.cash_balance_usd||0),0);
+  state.pnl.overall_settled_cash_usd = Object.values(state.pnl.assets).reduce((a,x)=>a+Number(x.settled_cash_usd||0),0);
   state.pnl.overall_starting_capital_usd = totalCapital;
   state.pnl.overall_equity_usd = totalCapital + state.pnl.overall_pnl_usd;
-  state.pnl.overall_available_capital_usd = Math.max(0, state.pnl.overall_equity_usd - state.pnl.overall_used_capital_usd);
+  state.pnl.overall_available_capital_usd = Math.max(0, state.pnl.overall_cash_balance_usd);
 }
 function mergeMarketEvent(asset, event) {
   const previous = (state.markets || {})[asset];
@@ -120,7 +125,8 @@ function render() {
     metric('Loop Latency', h.loop_latency_ms == null ? '—' : h.loop_latency_ms + 'ms', h.loop_latency_ms > 1000 ? 'red' : 'green'),
     metric('Last Update', h.last_update ? h.last_update.split('T')[1].slice(0,8) + ' UTC' : '—'),
     metric('Max Order', '$' + fmt(h.max_order_usd, 2)),
-    metric('Overall Capital', '$' + fmt((state.pnl||{}).overall_equity_usd, 2), ((state.pnl||{}).overall_equity_usd||0) >= ((state.pnl||{}).overall_starting_capital_usd||0) ? 'green' : 'red'),
+    metric('Account Equity', '$' + fmt((state.pnl||{}).overall_equity_usd, 2), ((state.pnl||{}).overall_equity_usd||0) >= ((state.pnl||{}).overall_starting_capital_usd||0) ? 'green' : 'red'),
+    metric('Available Cash', '$' + fmt((state.pnl||{}).overall_available_capital_usd, 2)),
     metric('Capital Used', '$' + fmt((state.pnl||{}).overall_used_capital_usd, 2)),
     metric('Overall PnL', '$' + fmt((state.pnl||{}).overall_pnl_usd, 2), ((state.pnl||{}).overall_pnl_usd||0) >= 0 ? 'green' : 'red'),
     metric('Charges', '$' + fmt((state.pnl||{}).overall_charges_usd, 4), 'yellow'),
@@ -146,7 +152,8 @@ function render() {
         <div class="row"><span class="muted">Spread</span><span>${cents(m.spread)}</span></div>
         <div class="row"><span class="muted">Spot / Price to Beat</span><span>${fmt(f.spot, asset==='XRP'?4:2)} / ${fmt(f.open, asset==='XRP'?4:2)}</span></div>
         <div class="row"><span class="muted">Distance</span><span>${distance}</span></div>
-        <div class="row"><span class="muted">Dry Capital</span><span>$${fmt(pa.used_capital_usd,2)} / $${fmt(pa.capital_usd,2)}</span></div>
+        <div class="row"><span class="muted">Cash / Used</span><span>$${fmt(pa.available_capital_usd,2)} / $${fmt(pa.used_capital_usd,2)}</span></div>
+        <div class="row"><span class="muted">Equity</span><span>$${fmt(pa.equity_usd,2)}</span></div>
         <div class="row"><span class="muted">Position</span><span>${pos.side || '—'} @ ${price(pos.entry_price)} | $${fmt(pos.notional_usd,2)}</span></div>
         <div class="row"><span class="muted">Execution / Status</span><span>${m.execution_type || '—'} @ ${price(m.execution_price || pos.entry_price)} / ${pos.status || m.dry_order_status || '—'}</span></div>
         <div class="row"><span class="muted">Mark / PnL</span><span>${price(pos.mark_price)} / <b class="${(pa.pnl_usd||0) >= 0 ? 'green':'red'}">$${fmt(pa.pnl_usd,2)}</b></span></div>
