@@ -30,8 +30,16 @@ def choose_candidate(settings: Settings, up_token: str, down_token: str, feature
         candidates.append(Candidate(features.p_down - down_book.ask, "DOWN", down_token, features.p_down, down_book))
     if not candidates:
         return None
-    if settings.trade_trigger_mode in {"signal", "edge_or_signal"}:
-        signal_candidates = [c for c in candidates if c.book.ask >= settings.min_signal_price]
+    signal_candidates = [c for c in candidates if c.book.ask >= settings.min_signal_price]
+    if settings.trade_trigger_mode == "signal":
+        # In signal mode, keep evaluating the side that actually touched the
+        # signal price. If model confirmation rejects it, apply_gates will emit
+        # `signal_not_confirmed_by_edge`. Falling back to the opposite/best-edge
+        # side makes the dashboard misleading (`signal_price_below_min` on the
+        # wrong side) and looks like the bot is quoting the opposite market.
+        if signal_candidates:
+            return max(signal_candidates, key=lambda c: c.book.ask)
+    elif settings.trade_trigger_mode == "edge_or_signal":
         if settings.require_signal_edge_confirmation:
             min_confirm_edge = settings.min_confirmation_edge_cents / 100
             signal_candidates = [c for c in signal_candidates if c.edge >= min_confirm_edge]

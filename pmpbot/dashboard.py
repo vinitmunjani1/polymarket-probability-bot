@@ -147,6 +147,7 @@ function render() {
         <div class="row"><span class="muted">Reason</span><span>${m.reason || (m.dry_run ? 'dry-run' : '—')}</span></div>
         ${m.stale_market_data ? `<div class="row"><span class="muted">Data Status</span><span class="yellow">stale: ${m.stale_reason || 'book unavailable'}</span></div>` : ''}
         <div class="row"><span class="muted">Bid / Ask</span><span>${price(m.bid)} / ${price(m.ask)}</span></div>
+        <div class="row"><span class="muted">UP / DOWN Ask</span><span>${price(m.up_ask)} / ${price(m.down_ask)}</span></div>
         <div class="row"><span class="muted">Fair Prob</span><span class="blue">${price(m.fair)}</span></div>
         <div class="row"><span class="muted">Edge</span><span class="${m.edge >= 0.03 ? 'green' : 'yellow'}">${cents(m.edge)}</span></div>
         <div class="row"><span class="muted">Spread</span><span>${cents(m.spread)}</span></div>
