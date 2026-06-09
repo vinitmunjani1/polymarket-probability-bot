@@ -30,7 +30,7 @@ class Settings:
     min_edge_cents: float = 3.0
     max_spread_cents: float = 3.0
     min_time_remaining_seconds: int = 20
-    max_time_remaining_seconds: int = 260
+    max_time_remaining_seconds: int = 120
     min_entry_price: float = 0.80
     max_entry_price: float = 0.90
     state_path: Path = Path("state.json")
@@ -91,7 +91,7 @@ class Settings:
             min_edge_cents=float(os.getenv("MIN_EDGE_CENTS", "3.0")),
             max_spread_cents=float(os.getenv("MAX_SPREAD_CENTS", "3.0")),
             min_time_remaining_seconds=int(os.getenv("MIN_TIME_REMAINING_SECONDS", "20")),
-            max_time_remaining_seconds=int(os.getenv("MAX_TIME_REMAINING_SECONDS", "260")),
+            max_time_remaining_seconds=int(os.getenv("MAX_TIME_REMAINING_SECONDS", "120")),
             min_entry_price=float(os.getenv("MIN_ENTRY_PRICE", "0.80")),
             max_entry_price=float(os.getenv("MAX_ENTRY_PRICE", "0.90")),
             state_path=Path(os.getenv("STATE_PATH", "state.json")),

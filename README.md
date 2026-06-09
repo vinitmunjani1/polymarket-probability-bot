@@ -21,6 +21,9 @@ The bot is split into focused modules so the 5-minute market loop stays fast:
 
 Trading rule v0:
 
+- only place new entries when the market has at most
+  `MAX_TIME_REMAINING_SECONDS=120` seconds left; if price touches `0.80`
+  earlier, the bot waits
 - wait until chosen side ask is at least `MIN_SIGNAL_PRICE=0.80`
 - require signal trades to be confirmed by non-negative model edge by default,
   avoiding sudden side-reversal/chase entries
