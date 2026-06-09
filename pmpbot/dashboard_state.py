@@ -127,11 +127,13 @@ class DashboardState:
             pnl = sum(float(p.get("pnl_usd") or 0.0) for p in asset_positions)
             charges = sum(float(p.get("charges_usd") or 0.0) for p in asset_positions)
             used = sum(float(p.get("notional_usd") or 0.0) for p in asset_positions if p.get("status", "open") == "open")
+            equity = self.settings.dry_capital_per_asset_usd + pnl
             total_used += used
             assets[asset] = {
                 "capital_usd": self.settings.dry_capital_per_asset_usd,
+                "equity_usd": equity,
                 "used_capital_usd": used,
-                "available_capital_usd": max(0.0, self.settings.dry_capital_per_asset_usd - used),
+                "available_capital_usd": max(0.0, equity - used),
                 "pnl_usd": pnl,
                 "charges_usd": charges,
                 "positions": asset_positions,
@@ -144,7 +146,7 @@ class DashboardState:
             "overall_starting_capital_usd": total_capital,
             "overall_equity_usd": total_capital + total_pnl,
             "overall_used_capital_usd": total_used,
-            "overall_available_capital_usd": max(0.0, total_capital - total_used),
+            "overall_available_capital_usd": max(0.0, total_capital + total_pnl - total_used),
             "overall_pnl_usd": total_pnl,
             "overall_charges_usd": total_charges,
             "assets": assets,

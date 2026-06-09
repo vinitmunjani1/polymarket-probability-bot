@@ -103,8 +103,9 @@ class BotEngine:
             "execution_price": execution_price,
             "execution_type": "market",
             "dry_order_status": "not_placed",
-            "dry_capital_usd": self.s.dry_capital_per_asset_usd,
+            "dry_capital_usd": self.state.asset_dry_equity(asset, self.s.dry_capital_per_asset_usd),
             "dry_used_capital_usd": self.state.asset_open_notional(asset),
+            "dry_available_capital_usd": self.state.asset_available_notional(asset, self.s.dry_capital_per_asset_usd),
             "latency_ms": self._latency(loop_start),
         }
         if existing_position:
@@ -130,8 +131,9 @@ class BotEngine:
 
         notional = min(1.0, self.s.order_notional_usd)
         dry_used = self.state.asset_open_notional(asset)
-        if self.s.execution_mode != "live" and dry_used + notional > self.s.dry_capital_per_asset_usd + 1e-9:
-            log.update({"event": "skip", "reason": "dry_capital_limit", "dry_used_capital_usd": dry_used})
+        dry_available = self.state.asset_available_notional(asset, self.s.dry_capital_per_asset_usd)
+        if self.s.execution_mode != "live" and notional > dry_available + 1e-9:
+            log.update({"event": "skip", "reason": "dry_capital_limit", "dry_used_capital_usd": dry_used, "dry_available_capital_usd": dry_available})
             self._emit(log)
             return
 
@@ -156,6 +158,7 @@ class BotEngine:
             )
             self.state.record_order(asset, start)
             log["dry_used_capital_usd"] = self.state.asset_open_notional(asset)
+            log["dry_available_capital_usd"] = self.state.asset_available_notional(asset, self.s.dry_capital_per_asset_usd)
             log.update(self._position_metrics(position, candidate.side, up_book, down_book))
         else:
             position = self.state.record_position(
@@ -173,6 +176,7 @@ class BotEngine:
             self.state.record_order(asset, start)
             log["dry_run"] = True
             log["dry_used_capital_usd"] = self.state.asset_open_notional(asset)
+            log["dry_available_capital_usd"] = self.state.asset_available_notional(asset, self.s.dry_capital_per_asset_usd)
             log.update(self._position_metrics(position, candidate.side, up_book, down_book))
         self._emit(log)
 
@@ -228,7 +232,9 @@ class BotEngine:
             "slug": slug,
             "settlement_price": exit_price,
             "dry_order_status": closed.get("status"),
+            "dry_capital_usd": self.state.asset_dry_equity(str(asset), self.s.dry_capital_per_asset_usd),
             "dry_used_capital_usd": self.state.asset_open_notional(str(asset)),
+            "dry_available_capital_usd": self.state.asset_available_notional(str(asset), self.s.dry_capital_per_asset_usd),
             **self._position_metrics(closed, closed.get("side"), None, None),
         })
 
@@ -261,7 +267,9 @@ class BotEngine:
         closed = self.state.close_position(asset, window, exit_price=exit_price, exit_reason="stop_loss_hit")
         event["dry_order_status"] = closed.get("status")
         event.update(self._position_metrics(closed, held_side, up_book, down_book))
+        event["dry_capital_usd"] = self.state.asset_dry_equity(asset, self.s.dry_capital_per_asset_usd)
         event["dry_used_capital_usd"] = self.state.asset_open_notional(asset)
+        event["dry_available_capital_usd"] = self.state.asset_available_notional(asset, self.s.dry_capital_per_asset_usd)
         return event
 
     @staticmethod

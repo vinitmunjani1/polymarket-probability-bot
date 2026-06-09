@@ -27,6 +27,19 @@ class State:
             if p.get("asset") == asset and p.get("status", "open") == "open"
         )
 
+    def asset_realized_pnl(self, asset: str) -> float:
+        return sum(
+            float(p.get("pnl_usd", 0.0) or 0.0)
+            for p in self.data.setdefault("positions", {}).values()
+            if p.get("asset") == asset and p.get("status") == "closed"
+        )
+
+    def asset_dry_equity(self, asset: str, starting_capital: float) -> float:
+        return float(starting_capital) + self.asset_realized_pnl(asset)
+
+    def asset_available_notional(self, asset: str, starting_capital: float) -> float:
+        return self.asset_dry_equity(asset, starting_capital) - self.asset_open_notional(asset)
+
     def record_order(self, asset: str, window: int) -> None:
         key = f"{asset}:{window}"
         orders = self.data.setdefault("orders", {})

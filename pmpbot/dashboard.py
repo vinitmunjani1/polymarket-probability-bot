@@ -79,7 +79,8 @@ function recomputePnl() {
     const capital = Number(m.dry_capital_usd ?? ((state.config||{}).dry_capital_per_asset_usd) ?? 10);
     const p = positions.length ? positions.reduce((a,x)=>a+Number(x.pnl_usd||0),0) : Number(pos.pnl_usd ?? m.position_pnl_usd ?? 0);
     const c = positions.length ? positions.reduce((a,x)=>a+Number(x.charges_usd||0),0) : Number(pos.charges_usd ?? m.position_charges_usd ?? 0);
-    pnl.assets[asset] = {capital_usd:capital, used_capital_usd:used, available_capital_usd:Math.max(0, capital-used), pnl_usd:p, charges_usd:c, positions, position: Object.keys(pos).length ? pos : null};
+    const equity = capital + p;
+    pnl.assets[asset] = {capital_usd:capital, equity_usd:equity, used_capital_usd:used, available_capital_usd:Math.max(0, equity-used), pnl_usd:p, charges_usd:c, positions, position: Object.keys(pos).length ? pos : null};
     pnl.overall_pnl_usd += p; pnl.overall_charges_usd += c;
   }
   const totalCapital = Number(((state.config||{}).dry_capital_per_asset_usd) || 10) * assets.length;
@@ -90,7 +91,7 @@ function recomputePnl() {
     overall_starting_capital_usd: totalCapital,
     overall_equity_usd: totalCapital,
     overall_used_capital_usd: overallUsed,
-    overall_available_capital_usd: Math.max(0, totalCapital - overallUsed),
+    overall_available_capital_usd: Math.max(0, totalCapital + pnl.overall_pnl_usd - overallUsed),
     // Preserve existing assets only when there is no fresh market event;
     // fresh computed values must overwrite old cached PnL.
     assets: {...previousAssets, ...pnl.assets},
@@ -99,8 +100,8 @@ function recomputePnl() {
   state.pnl.overall_charges_usd = Object.values(state.pnl.assets).reduce((a,x)=>a+Number(x.charges_usd||0),0);
   state.pnl.overall_used_capital_usd = Object.values(state.pnl.assets).reduce((a,x)=>a+Number(x.used_capital_usd||0),0);
   state.pnl.overall_starting_capital_usd = totalCapital;
-  state.pnl.overall_available_capital_usd = Math.max(0, totalCapital - state.pnl.overall_used_capital_usd);
   state.pnl.overall_equity_usd = totalCapital + state.pnl.overall_pnl_usd;
+  state.pnl.overall_available_capital_usd = Math.max(0, state.pnl.overall_equity_usd - state.pnl.overall_used_capital_usd);
 }
 function mergeMarketEvent(asset, event) {
   const previous = (state.markets || {})[asset];
